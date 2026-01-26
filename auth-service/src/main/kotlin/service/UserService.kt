@@ -19,16 +19,6 @@ class UserService(
      * @throws
      */
     suspend fun registerUser(user: UserDto.UserRegister): String {
-        // 检查用户名是否已存在
-        if (user.username != null && userRepository.existsByUsername(user.username!!)) {
-            throw AuthException.UserAlreadyExistsException()
-        }
-
-        // 验证医院和科室是否有效
-        if (!userRepository.existsByHospitalAndDept(user.hospitalId, user.deptCode)) {
-            throw AuthException.HospitalOrDepartmentIdInvalidException()
-        }
-
         // 检查密码强度
         if (!isPasswordStrong(user.password)) {
             throw AuthException.PasswordTooWeakException()
@@ -37,18 +27,54 @@ class UserService(
         // 加密密码
         val encryptedPassword = hashPassword(user.password)
 
-        // 创建 UserCreate 对象
-        val userCreate = UserDto.UserCreate(
-            hospitalId = user.hospitalId,
-            deptCode = user.deptCode,
-            userSeq = user.userSeq,
-            username = user.username,
-            fullName = user.fullName,
-            passwordHash = encryptedPassword,
-            role = "doctor" // 默认角色
-        )
+        // 根据角色处理不同的注册逻辑
+        if (user.role == "admin") {
+            // 管理员注册
+            // 生成临时用户ID（实际会被数据库生成的ID替换）
+            val tempUserId = System.currentTimeMillis().toString().takeLast(6)
+            // 生成管理员账号：admin-用户id
+            val adminUsername = "admin-$tempUserId"
+            
+            // 创建 UserCreate 对象
+            val userCreate = UserDto.UserCreate(
+                hospitalId = "",
+                deptCode = "",
+                userSeq = tempUserId,
+                username = adminUsername,
+                fullName = user.fullName,
+                passwordHash = encryptedPassword,
+                role = "admin"
+            )
 
-        return userRepository.createUser(userCreate)
+            return userRepository.createUser(userCreate)
+        } else {
+            // 普通用户注册
+            // 验证医院和科室是否有效
+            val hospitalId = user.hospitalId ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
+            val deptCode = user.deptCode ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
+            
+            if (!userRepository.existsByHospitalAndDept(hospitalId, deptCode)) {
+                throw AuthException.HospitalOrDepartmentIdInvalidException()
+            }
+
+            // 生成临时用户ID（实际会被数据库生成的ID替换）
+            val tempUserId = System.currentTimeMillis().toString().takeLast(6)
+            // 生成用户账号：医院id-部门id-用户id
+            val userUsername = "$hospitalId-$deptCode-$tempUserId"
+            
+            // 创建 UserCreate 对象
+            val userCreate = UserDto.UserCreate(
+                hospitalId = hospitalId,
+                deptCode = deptCode,
+                userSeq = tempUserId,
+                username = userUsername,
+                fullName = user.fullName,
+                passwordHash = encryptedPassword,
+                role = "doctor" // 默认角色
+            )
+
+            return userRepository.createUser(userCreate)
+        }
     }
 
     /**
@@ -110,7 +136,7 @@ class UserService(
         val user = userWithCredentials.toUserInfo()
 
         // 生成JWT token
-        val token = jwtUtil.generateToken(user.id, user.username?:"", user.role)
+        val token = jwtUtil.generateToken(user.id, user.username?:"", mapOf("role" to user.role))
 
         // 返回包含用户信息和token的结果
         return mapOf(
@@ -152,9 +178,7 @@ class UserService(
      * @return List<UserDto.UserInfo>
      */
     suspend fun getAllUsers(page: Int = 0, size: Int = 20, role: String? = null): List<UserDto.UserInfo> {
-        // 注意：这里需要在 UserRepository 中实现对应的查询方法
-        // 当前只是示例，实际需要根据数据库表结构实现
-        throw Exception("功能待实现：需要在 UserRepository 中添加分页查询方法")
+        return userRepository.findAllUsers(page, size, role)
     }
 
     /**
@@ -163,8 +187,7 @@ class UserService(
      * @return List<UserDto.UserInfo>
      */
     suspend fun searchUsers(keyword: String): List<UserDto.UserInfo> {
-        // 注意：这里需要在 UserRepository 中实现对应的查询方法
-        throw Exception("功能待实现：需要在 UserRepository 中添加搜索查询方法")
+        return userRepository.searchUsers(keyword)
     }
 
     /**
@@ -208,8 +231,7 @@ class UserService(
             throw AuthException.HospitalIdInvalidException()
         }
 
-        // 注意：这里需要在 UserRepository 中实现根据医院ID查询用户的方法
-        throw Exception("功能待实现：需要在 UserRepository 中添加根据医院ID查询用户的方法")
+        return userRepository.findUsersByHospitalId(hospitalId)
     }
 
     /**
@@ -652,7 +674,7 @@ class UserService(
         val user = userRepository.findUserById(userId)
             ?: throw Exception("用户不存在")
 
-        return jwtUtil.generateToken(user.id, user.username?:"", user.role)
+        return jwtUtil.generateToken(user.id, user.username?:"", mapOf("role" to user.role))
     }
 
     /**
@@ -660,12 +682,11 @@ class UserService(
      * @param token JWT token
      * @return UserDto.UserInfo
      */
-    fun validateTokenAndGetUser(token: String): UserDto.UserInfo {
+    suspend fun validateTokenAndGetUser(token: String): UserDto.UserInfo {
         val userId = jwtUtil.getUserIdFromToken(token)?:throw Exception("Token中缺少用户ID")
 
-        // 注意：这里需要调用 suspend 函数，但当前方法不是 suspend
-        // 实际使用时需要调整
-        throw Exception("功能待实现：需要调整方法签名为 suspend")
+        return userRepository.findUserById(userId)
+            ?: throw Exception("用户不存在")
     }
 
     /**
@@ -673,9 +694,8 @@ class UserService(
      * @param hospitalId 医院ID（可选）
      * @return Map<String, Int> 统计信息
      */
-    suspend fun getUserStatistics(hospitalId: String? = null): Map<String, Int> {
-        // 注意：这里需要在 UserRepository 中实现统计查询方法
-        throw Exception("功能待实现：需要在 UserRepository 中添加统计查询方法")
+    suspend fun getUserStatistics(hospitalId: String? = null): Map<String, Any> {  // 修改返回类型以匹配实际实现
+        return userRepository.getUserStatistics(hospitalId)
     }
 
     /**
@@ -688,9 +708,7 @@ class UserService(
             ?: return false
 
         // 检查用户是否被删除（软删除）
-        // 注意：当前 UserDto.UserInfo 没有包含 isDeleted 字段
-        // 需要添加该字段或通过其他方式判断
-        return true
+        return !user.isDeleted
     }
 
 }

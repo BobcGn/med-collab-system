@@ -1,14 +1,15 @@
 package com.example.database.repository
 
-
 import database.entity.UserEntity
 import database.table.Users
 import dto.UserDto
-import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
-class UserRepository {
+class UserRepository(
+    private val hospitalRepository: com.example.database.repository.HospitalRepository,
+    private val departmentRepository: com.example.database.repository.DepartmentRepository
+) {
     /**
      * 创建新用户
      */
@@ -49,7 +50,8 @@ class UserRepository {
                         fullName = entity.fullName,
                         role = entity.role,
                         createdAt = entity.createdAt.toString(),
-                        updatedAt = entity.updatedAt?.toString()
+                        updatedAt = entity.updatedAt?.toString(),
+                        isDeleted = entity.isDeleted
                     )
                 }
             }
@@ -77,7 +79,8 @@ class UserRepository {
                         role = entity.role,
                         passwordHash = entity.passwordHash,
                         createdAt = entity.createdAt.toString(),
-                        updatedAt = entity.updatedAt?.toString()
+                        updatedAt = entity.updatedAt?.toString(),
+                        isDeleted = entity.isDeleted
                     )
                 }
             }
@@ -106,7 +109,8 @@ class UserRepository {
                             fullName = entity.fullName,
                             role = entity.role,
                             createdAt = entity.createdAt.toString(),
-                            updatedAt = entity.updatedAt?.toString()
+                            updatedAt = entity.updatedAt?.toString(),
+                            isDeleted = entity.isDeleted
                         )
                     }
             }
@@ -136,7 +140,8 @@ class UserRepository {
                             role = entity.role,
                             passwordHash = entity.passwordHash,
                             createdAt = entity.createdAt.toString(),
-                            updatedAt = entity.updatedAt?.toString()
+                            updatedAt = entity.updatedAt?.toString(),
+                            isDeleted = entity.isDeleted
                         )
                     }
             }
@@ -203,7 +208,8 @@ class UserRepository {
                         fullName = entity.fullName,
                         role = entity.role,
                         createdAt = entity.createdAt.toString(),
-                        updatedAt = entity.updatedAt?.toString()
+                        updatedAt = entity.updatedAt?.toString(),
+                        isDeleted = entity.isDeleted
                     )
                 }
             }
@@ -235,13 +241,16 @@ class UserRepository {
      * @param deptCode
      * @return Boolean
      */
-    suspend fun existsByHospitalAndDept(hospitalId: String, deptCode: String): Boolean{
+    suspend fun existsByHospitalAndDept(hospitalId: String, deptCode: String): Boolean {
         return try {
-            transaction {
-                !UserEntity.find { (Users.hospitalId eq hospitalId) and (Users.deptCode eq deptCode) }.empty()
-            }
-        }catch (e: Exception){
-            throw Exception("检查医院和科室失败")
+            // 检查医院是否存在且激活
+            val hospitalExists = hospitalRepository.existsActiveById(hospitalId)
+            if (!hospitalExists) return false
+
+            // 检查科室是否存在且激活
+            departmentRepository.existsActiveByHospitalAndId(hospitalId, deptCode)
+        } catch (e: Exception) {
+            throw Exception("检查医院和科室失败: ${e.message}")
         }
     }
 
@@ -252,11 +261,142 @@ class UserRepository {
      */
     suspend fun existsByHospital(hospitalId: String): Boolean {
         return try {
+            hospitalRepository.existsActiveById(hospitalId)
+        } catch (e: Exception) {
+            throw Exception("检查医院失败: ${e.message}")
+        }
+    }
+
+    /**
+     * 分页查询所有用户
+     * @param page 页码，从0开始
+     * @param size 每页大小
+     * @param role 角色过滤（可选）
+     * @return List<UserDto.UserInfo>
+     */
+    suspend fun findAllUsers(page: Int, size: Int, role: String? = null): List<UserDto.UserInfo> {
+        // 验证输入参数
+        if (page < 0 || size <= 0) {
+            return emptyList()
+        }
+
+        return try {
             transaction {
-                !UserEntity.find { Users.hospitalId eq hospitalId }.empty()
+                val query = if (role != null) {
+                    UserEntity.find { Users.role eq role }
+                } else {
+                    UserEntity.all()
+                }
+
+                query
+                    .limit(size)
+                    .offset(page.toLong() * size)
+                    .map {
+                        UserDto.UserInfo(
+                            id = it.id.value,
+                            hospitalId = it.hospitalId,
+                            deptCode = it.deptCode,
+                            userSeq = it.userSeq,
+                            username = it.username,
+                            fullName = it.fullName,
+                            role = it.role,
+                            createdAt = it.createdAt.toString(),
+                            updatedAt = it.updatedAt?.toString(),
+                            isDeleted = it.isDeleted
+                        )
+                    }
             }
-        }catch (e: Exception){
-            throw Exception("检查医院失败")
+        } catch (e: Exception) {
+            throw Exception("分页查询用户失败")
+        }
+    }
+
+    /**
+     * 搜索用户
+     * @param keyword 搜索关键词（用户名或姓名）
+     * @return List<UserDto.UserInfo>
+     */
+    suspend fun searchUsers(keyword: String): List<UserDto.UserInfo> {
+        return try {
+            transaction {
+                UserEntity.find {
+                    (Users.username like "%$keyword%") or (Users.fullName like "%$keyword%")
+                }
+                .map {
+                    UserDto.UserInfo(
+                        id = it.id.value,
+                        hospitalId = it.hospitalId,
+                        deptCode = it.deptCode,
+                        userSeq = it.userSeq,
+                        username = it.username,
+                        fullName = it.fullName,
+                        role = it.role,
+                        createdAt = it.createdAt.toString(),
+                        updatedAt = it.updatedAt?.toString(),
+                        isDeleted = it.isDeleted
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            throw Exception("搜索用户失败")
+        }
+    }
+
+    /**
+     * 根据医院ID查询用户
+     * @param hospitalId 医院ID
+     * @return List<UserDto.UserInfo>
+     */
+    suspend fun findUsersByHospitalId(hospitalId: String): List<UserDto.UserInfo> {
+        return try {
+            transaction {
+                UserEntity.find { Users.hospitalId eq hospitalId }
+                .map {
+                    UserDto.UserInfo(
+                        id = it.id.value,
+                        hospitalId = it.hospitalId,
+                        deptCode = it.deptCode,
+                        userSeq = it.userSeq,
+                        username = it.username,
+                        fullName = it.fullName,
+                        role = it.role,
+                        createdAt = it.createdAt.toString(),
+                        updatedAt = it.updatedAt?.toString(),
+                        isDeleted = it.isDeleted
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            throw Exception("根据医院ID查询用户失败")
+        }
+    }
+
+    /**
+     * 获取用户统计信息
+     * @param hospitalId 医院ID（可选）
+     * @return Map<String, Int> 统计信息
+     */
+    suspend fun getUserStatistics(hospitalId: String? = null): Map<String, Any> {  // 修改返回类型
+        return try {
+            transaction {
+                val query = if (hospitalId != null) {
+                    UserEntity.find { Users.hospitalId eq hospitalId }
+                } else {
+                    UserEntity.all()
+                }
+
+                val total = query.count().toInt()
+                val byRole = query.groupBy { it.role }.mapValues { it.value.size }
+                val deleted = query.filter { it.isDeleted }.count().toInt()
+
+                mapOf(
+                    "total" to total,
+                    "deleted" to deleted,
+                    "byRole" to byRole
+                )
+            }
+        } catch (e: Exception) {
+            throw Exception("获取用户统计信息失败")
         }
     }
 }

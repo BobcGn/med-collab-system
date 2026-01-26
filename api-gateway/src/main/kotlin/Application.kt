@@ -7,6 +7,9 @@ fun main(args: Array<String>) {
 }
 
 fun Application.module() {
+    // 0. 初始化服务配置（加载环境变量和配置文件）
+    ServiceConfig.initConfig(environment.config)
+
     // 1. 配置HTTP(CORS等)
     configureHTTP()
 

@@ -25,15 +25,20 @@ fun Application.configureSecurity() {
 
             // JWT 验证器 - 使用 JwtUtil 类提供的验证逻辑
             validate { credential ->
-                // 直接从credential获取payload信息
-                val userId = credential.payload.getClaim("userId").asString()
-                val username = credential.payload.getClaim("username").asString()
+                try {
+                    // 直接从credential获取payload信息
+                    val userId = credential.payload.getClaim("userId").asString()
+                    val username = credential.payload.getClaim("username").asString()
 
-                // 验证令牌有效性
-                if (userId != null && jwtUtil.validateToken(credential.payload.subject)) {
-                    // 创建包含用户信息的 JWTPrincipal
-                    JWTPrincipal(credential.payload)
-                } else {
+                    // 验证令牌有效性（使用完整token字符串进行验证）
+                    val token = call.request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")
+                    if (token != null && jwtUtil.validateToken(token) && userId.isNotEmpty()) {
+                        // 验证过期时间（ JwtUtil 内部已处理）
+                        JWTPrincipal(credential.payload)
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
                     null
                 }
             }

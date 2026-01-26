@@ -2,6 +2,14 @@ package dto
 
 sealed class UserDto {
     /**
+     * 用户隶属医院和部门的数据类
+     */
+    data class UserAffiliation(
+        val hospitalId: String,
+        val deptCode: String
+    ): UserDto()
+
+    /**
      * 用户完整信息数据类（不包含密码哈希，用于对外展示）
      */
     data class UserInfo(
@@ -13,7 +21,8 @@ sealed class UserDto {
         val fullName: String,
         val role: String,
         val createdAt: String,
-        val updatedAt: String?
+        val updatedAt: String?,
+        val isDeleted: Boolean = false
     ) : UserDto()
 
     /**
@@ -29,7 +38,8 @@ sealed class UserDto {
         val role: String,
         val passwordHash: String,
         val createdAt: String,
-        val updatedAt: String?
+        val updatedAt: String?,
+        val isDeleted: Boolean = false
     ) : UserDto() {
         /**
          * 转换为不包含密码的 UserInfo
@@ -44,7 +54,8 @@ sealed class UserDto {
                 fullName = fullName,
                 role = role,
                 createdAt = createdAt,
-                updatedAt = updatedAt
+                updatedAt = updatedAt,
+                isDeleted = isDeleted
             )
         }
     }
@@ -61,10 +72,10 @@ sealed class UserDto {
      * 用户注册数据类
      */
     data class UserRegister(
-        val hospitalId: String,
-        val deptCode: String,
-        val userSeq: String,
-        val username: String?,
+        val role: String,
+        val hospitalId: String? = null,
+        val deptCode: String? = null,
+        val username: String? = null,
         val password: String,
         val fullName: String
     ) : UserDto()

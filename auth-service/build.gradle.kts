@@ -30,7 +30,8 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-jdbc:0.61.0")
     implementation("org.jetbrains.exposed:exposed-dao:0.61.0")
     implementation("org.jetbrains.exposed:exposed-java-time:0.61.0")
-    implementation("com.h2database:h2:2.3.232")
+    implementation("com.mysql:mysql-connector-j:8.4.0")
+
 
     // Logging
     implementation("ch.qos.logback:logback-classic:1.4.14")

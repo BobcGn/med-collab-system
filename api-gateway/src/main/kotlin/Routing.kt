@@ -104,17 +104,19 @@ fun Application.configureRouting() {
             }
         }
 
-        // 404处理
-        get("{...}") {
-            call.respond(
-                HttpStatusCode.NotFound,
-                StandardResponse(
-                    success = false,
-                    code = 404,
-                    message = "接口不存在",
-                    data = null
+        // 404处理 - 支持所有HTTP方法
+        route("{...}") {
+            handle {
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    StandardResponse(
+                        success = false,
+                        code = 404,
+                        message = "接口不存在",
+                        data = null
+                    )
                 )
-            )
+            }
         }
     }
 }
@@ -145,7 +147,13 @@ private suspend fun forwardToService(
     // 构建目标URL
     val originalPath = call.request.path()
     val pathWithoutPrefix = originalPath.substring(service.pathPrefix.length)
-    val targetUrl = "${service.baseUrl}$pathWithoutPrefix${if (call.request.queryString().isNotEmpty()) "?${call.request.queryString()}" else ""}"
+    // 修复路径拼接问题，避免双斜杠
+    val normalizedPath = if (pathWithoutPrefix.startsWith("/") || service.baseUrl.endsWith("/")) {
+        "${service.baseUrl}$pathWithoutPrefix"
+    } else {
+        "${service.baseUrl}/$pathWithoutPrefix"
+    }
+    val targetUrl = "$normalizedPath${if (!call.request.queryString().isNullOrEmpty()) "?${call.request.queryString()}" else ""}"
 
     // 转发请求
     call.forwardRequest(targetUrl, call.request.headers)

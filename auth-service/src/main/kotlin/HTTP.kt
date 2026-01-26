@@ -1,27 +1,32 @@
 package com.example
 
-import com.auth0.jwt.JWT
-import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.http.*
-import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
-import io.ktor.server.auth.*
-import io.ktor.server.auth.jwt.*
-import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
-import io.ktor.server.request.*
-import io.ktor.server.response.*
-import io.ktor.server.routing.*
-import org.jetbrains.exposed.sql.*
 
 fun Application.configureHTTP() {
     install(CORS) {
+        // 允许的方法
         allowMethod(HttpMethod.Options)
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Put)
-        allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Patch)
+        allowMethod(HttpMethod.Delete)
+
+        // 允许的请求头
         allowHeader(HttpHeaders.Authorization)
-        allowHeader("MyCustomHeader")
-        anyHost() // @TODO: Don't do this in production if possible. Try to limit it.
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader(HttpHeaders.XForwardedProto)
+        allowHeader(HttpHeaders.Accept)
+        allowHeader(HttpHeaders.Origin)
+        allowHeader("X-Requested-With")
+
+        // 允许的凭证
+        allowCredentials = true
+        allowNonSimpleContentTypes = true
+
+        // 允许的来源(开发环境可以设置为 *)
+        anyHost()  // 生产环境建议设置具体域名
     }
 }
