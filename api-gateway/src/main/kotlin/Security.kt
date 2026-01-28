@@ -1,14 +1,11 @@
 package com.example
 
-import com.auth0.jwt.interfaces.Payload
-import io.ktor.http.HttpStatusCode
+import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
-import io.ktor.server.response.respond
-import kotlinx.serialization.Serializable
+import io.ktor.server.response.*
 import utils.JwtUtil
-
 
 
 /**
@@ -26,14 +23,12 @@ fun Application.configureSecurity() {
             // JWT 验证器 - 使用 JwtUtil 类提供的验证逻辑
             validate { credential ->
                 try {
-                    // 直接从credential获取payload信息
+                    // 从凭证中提取用户信息
                     val userId = credential.payload.getClaim("userId").asString()
                     val username = credential.payload.getClaim("username").asString()
 
-                    // 验证令牌有效性（使用完整token字符串进行验证）
-                    val token = call.request.headers[HttpHeaders.Authorization]?.removePrefix("Bearer ")
-                    if (token != null && jwtUtil.validateToken(token) && userId.isNotEmpty()) {
-                        // 验证过期时间（ JwtUtil 内部已处理）
+                    // 在validate函数外部无法直接访问call，所以我们直接验证JWT凭证的有效性
+                    if (userId != null && userId.isNotEmpty()) {
                         JWTPrincipal(credential.payload)
                     } else {
                         null

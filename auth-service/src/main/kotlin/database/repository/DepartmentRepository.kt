@@ -96,10 +96,10 @@ class DepartmentRepository {
     /**
      * 更新部门信息
      */
-    suspend fun updateDepartment(department: DepartmentDto.DepartmentUpdate): Boolean {
+    suspend fun updateDepartment(id: String, department: DepartmentDto.DepartmentUpdate): Boolean {
         return try {
             transaction {
-                DepartmentEntity.findById(department.id)?.let { entity ->
+                DepartmentEntity.findById(id)?.let { entity ->
                     department.name?.let { entity.name = it }
                     department.isActive?.let { entity.isActive = it }
                     true

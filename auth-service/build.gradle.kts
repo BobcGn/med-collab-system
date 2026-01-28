@@ -35,6 +35,10 @@ dependencies {
 
     // Logging
     implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation("io.ktor:ktor-server-core:3.3.2")
+    implementation("io.ktor:ktor-server-host-common:3.3.2")
+    implementation("io.ktor:ktor-server-status-pages:3.3.2")
+    implementation("io.ktor:ktor-server-core:3.3.2")
 
     // Testing
     testImplementation("io.ktor:ktor-server-test-host-jvm:3.3.2")

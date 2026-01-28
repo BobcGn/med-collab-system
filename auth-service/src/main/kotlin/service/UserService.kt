@@ -15,10 +15,10 @@ class UserService(
      * 用户注册（便捷方法）
      *
      * @param user
-     * @return 用户ID
+     * @return UserDto.RegisterResponse 包含用户信息和消息
      * @throws
      */
-    suspend fun registerUser(user: UserDto.UserRegister): String {
+    suspend fun registerUser(user: UserDto.UserRegister): UserDto.RegisterResponse {
         // 检查密码强度
         if (!isPasswordStrong(user.password)) {
             throw AuthException.PasswordTooWeakException()
@@ -34,11 +34,11 @@ class UserService(
             val tempUserId = System.currentTimeMillis().toString().takeLast(6)
             // 生成管理员账号：admin-用户id
             val adminUsername = "admin-$tempUserId"
-            
+
             // 创建 UserCreate 对象
             val userCreate = UserDto.UserCreate(
-                hospitalId = "",
-                deptCode = "",
+                hospitalId = null,
+                deptCode = null,
                 userSeq = tempUserId,
                 username = adminUsername,
                 fullName = user.fullName,
@@ -46,13 +46,20 @@ class UserService(
                 role = "admin"
             )
 
-            return userRepository.createUser(userCreate)
+            val userId = userRepository.createUser(userCreate)
+            val createdUser = userRepository.findUserById(userId)
+                ?: throw Exception("用户创建失败")
+
+            return UserDto.RegisterResponse(
+                user = createdUser,
+                message = "注册成功"
+            )
         } else {
             // 普通用户注册
             // 验证医院和科室是否有效
             val hospitalId = user.hospitalId ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
             val deptCode = user.deptCode ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
-            
+
             if (!userRepository.existsByHospitalAndDept(hospitalId, deptCode)) {
                 throw AuthException.HospitalOrDepartmentIdInvalidException()
             }
@@ -61,7 +68,7 @@ class UserService(
             val tempUserId = System.currentTimeMillis().toString().takeLast(6)
             // 生成用户账号：医院id-部门id-用户id
             val userUsername = "$hospitalId-$deptCode-$tempUserId"
-            
+
             // 创建 UserCreate 对象
             val userCreate = UserDto.UserCreate(
                 hospitalId = hospitalId,
@@ -73,7 +80,14 @@ class UserService(
                 role = "doctor" // 默认角色
             )
 
-            return userRepository.createUser(userCreate)
+            val userId = userRepository.createUser(userCreate)
+            val createdUser = userRepository.findUserById(userId)
+                ?: throw Exception("用户创建失败")
+
+            return UserDto.RegisterResponse(
+                user = createdUser,
+                message = "注册成功"
+            )
         }
     }
 
@@ -91,8 +105,11 @@ class UserService(
         if (userRepository.existsByUsername(user.username!!)){
             throw AuthException.UserAlreadyExistsException()
         }
-        if (!userRepository.existsByHospitalAndDept(user.hospitalId, user.deptCode)){
-            throw AuthException.HospitalOrDepartmentIdInvalidException()
+        // 只有非管理员用户才需要验证医院和科室
+        if (user.role != "admin") {
+            if (!userRepository.existsByHospitalAndDept(user.hospitalId!!, user.deptCode!!)){
+                throw AuthException.HospitalOrDepartmentIdInvalidException()
+            }
         }
 
         // 检查密码强度并加密
@@ -119,13 +136,24 @@ class UserService(
      * 业务规则：
      * 1. 验证用户是否存在
      * 2. 验证密码是否正确
+     * 3. 检查用户是否被冻结或删除
      * @param userLogin
-     * @return UserDto.UserInfo
+     * @return UserDto.LoginResponse
      */
-    suspend fun loginUser(userLogin: UserDto.UserLogin): Map<String, Any> {
+    suspend fun loginUser(userLogin: UserDto.UserLogin): UserDto.LoginResponse {
         // 验证用户是否存在（获取包含密码哈希的用户信息）
         val userWithCredentials = userRepository.findUserByUsernameWithCredentials(userLogin.username)
             ?: throw AuthException.UserNotFoundException()
+
+        // 检查用户是否被冻结
+        if (userWithCredentials.isFrozen) {
+            throw AuthException.AccountFrozenException()
+        }
+
+        // 检查用户是否被删除
+        if (userWithCredentials.isDeleted) {
+            throw AuthException.UserNotFoundException()
+        }
 
         // 验证密码是否正确 - 这里就是关键的密码验证逻辑
         if (!verifyPassword(userLogin.password, userWithCredentials.passwordHash)) {
@@ -139,9 +167,9 @@ class UserService(
         val token = jwtUtil.generateToken(user.id, user.username?:"", mapOf("role" to user.role))
 
         // 返回包含用户信息和token的结果
-        return mapOf(
-            "user" to user,
-            "token" to token
+        return UserDto.LoginResponse(
+            user = user,
+            token = token
         )
     }
 
@@ -240,8 +268,9 @@ class UserService(
      * @return Boolean
      */
     suspend fun updateUser(userUpdate: UserDto.UserUpdate): Boolean {
+        val userId = userUpdate.id ?: throw Exception("缺少用户ID")
         // 验证用户是否存在
-        val existingUser = userRepository.findUserById(userUpdate.id)
+        val existingUser = userRepository.findUserById(userId)
             ?: throw AuthException.UserNotFoundException()
 
         // 如果更新密码，需要进行密码强度检查和加密
@@ -261,6 +290,61 @@ class UserService(
         )
 
         return userRepository.updateUser(updatedUser)
+    }
+
+    /**
+     * 冻结用户
+     * @param userId 用户ID
+     * @param operatorId 操作者ID（用于权限验证）
+     * @return Boolean
+     */
+    suspend fun freezeUser(userId: String, operatorId: String): Boolean {
+        // 验证操作者是否为管理员
+        if (!isAdmin(operatorId)) {
+            throw AuthException.PermissionDeniedException()
+        }
+
+        // 验证目标用户是否存在
+        val existingUser = userRepository.findUserById(userId)
+            ?: throw AuthException.UserNotFoundException()
+
+        // 不能冻结自己
+        if (userId == operatorId) {
+            throw AuthException.CannotDeleteSelfException()
+        }
+
+        // 更新冻结状态
+        return userRepository.updateUser(
+            UserDto.UserUpdate(
+                id = userId,
+                isFrozen = true
+            )
+        )
+    }
+
+    /**
+     * 解冻用户
+     * @param userId 用户ID
+     * @param operatorId 操作者ID（用于权限验证）
+     * @return Boolean
+     */
+    suspend fun unfreezeUser(userId: String, operatorId: String): Boolean {
+        // 验证操作者是否为管理员
+        if (!isAdmin(operatorId)) {
+            throw AuthException.PermissionDeniedException()
+        }
+
+        // 验证目标用户是否存在
+        userRepository.findUserById(userId)
+            ?: throw AuthException.UserNotFoundException()
+
+        // 更新冻结状态
+        return userRepository.updateUser(
+            UserDto.UserUpdate(
+                id = userId,
+                isFrozen = false
+            )
+        )
     }
 
     /**

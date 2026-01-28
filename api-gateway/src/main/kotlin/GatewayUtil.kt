@@ -46,6 +46,7 @@ object GatewayUtil {
 
                 // 转发请求体(对于POST/PUT/PATCH请求)
                 if (method in listOf(HttpMethod.Post, HttpMethod.Put, HttpMethod.Patch)) {
+                    // 直接转发请求体，Content-Type已在headers中
                     setBody(receiveChannel())
                 }
 
@@ -112,7 +113,14 @@ object GatewayUtil {
             HttpHeaders.ContentLength,
             HttpHeaders.Connection,
             "Keep-Alive",
-            "Transfer-Encoding"
+            "Transfer-Encoding",
+            // 跳过CORS相关头，由网关统一处理
+            "Access-Control-Allow-Origin",
+            "Access-Control-Allow-Credentials",
+            "Access-Control-Allow-Methods",
+            "Access-Control-Allow-Headers",
+            "Access-Control-Expose-Headers",
+            "Access-Control-Max-Age"
         )
         return skipHeaders.any { name.equals(it, ignoreCase = true) }
     }

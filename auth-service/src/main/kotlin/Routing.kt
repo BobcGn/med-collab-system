@@ -24,8 +24,9 @@ fun Application.configureRouting() {
     val departmentRepository = DepartmentRepository()
     val userRepository = UserRepository(hospitalRepository, departmentRepository)
 
-    // 创建UserService实例
+    // 创建Service实例
     val userService = com.example.service.UserService(userRepository, jwtUtil)
+    val hospitalService = com.example.service.HospitalService(hospitalRepository, departmentRepository, userService)
     
     // 路由配置
     routing {
@@ -34,23 +35,21 @@ fun Application.configureRouting() {
             call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
         }
         
-        // API前缀
-        route("/api/auth") {
-            // 公开路由 - 不需要认证
-            post("/register") {
-                val userRegister = call.receive<UserDto.UserRegister>()
-                val userId = userService.registerUser(userRegister)
-                call.respond(HttpStatusCode.Created, mapOf("userId" to userId))
-            }
-            
-            post("/login") {
-                val userLogin = call.receive<UserDto.UserLogin>()
-                val result = userService.loginUser(userLogin)
-                call.respond(HttpStatusCode.OK, result)
-            }
-            
-            // 需要认证的路由
-            authenticate("jwt") {
+        // 公开路由 - 不需要认证（网关已经处理了/api/auth前缀，这里直接使用路径）
+        post("/register") {
+            val userRegister = call.receive<UserDto.UserRegister>()
+            val result = userService.registerUser(userRegister)
+            call.respond(HttpStatusCode.Created, result)
+        }
+        
+        post("/login") {
+            val userLogin = call.receive<UserDto.UserLogin>()
+            val result = userService.loginUser(userLogin)
+            call.respond(HttpStatusCode.OK, result)
+        }
+        
+        // 需要认证的路由
+        authenticate("jwt") {
                 // 获取当前用户信息
                 get("/user") {
                     val principal = call.principal<JWTPrincipal>()
@@ -159,7 +158,7 @@ fun Application.configureRouting() {
                     val success = userService.changeUsername(userId, newUsername)
                     call.respond(HttpStatusCode.OK, mapOf("success" to success))
                 }
-                
+
                 // 更新用户角色
                 put("/users/{id}/role") {
                     val principal = call.principal<JWTPrincipal>()
@@ -168,6 +167,24 @@ fun Application.configureRouting() {
                     val request = call.receive<Map<String, String>>()
                     val newRole = request["newRole"] ?: throw Exception("缺少新角色")
                     val success = userService.changeRole(userId, newRole, operatorId)
+                    call.respond(HttpStatusCode.OK, mapOf("success" to success))
+                }
+
+                // 冻结用户
+                put("/users/{id}/freeze") {
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
+                    val userId = call.parameters["id"] ?: throw Exception("缺少用户ID")
+                    val success = userService.freezeUser(userId, operatorId)
+                    call.respond(HttpStatusCode.OK, mapOf("success" to success))
+                }
+
+                // 解冻用户
+                put("/users/{id}/unfreeze") {
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
+                    val userId = call.parameters["id"] ?: throw Exception("缺少用户ID")
+                    val success = userService.unfreezeUser(userId, operatorId)
                     call.respond(HttpStatusCode.OK, mapOf("success" to success))
                 }
                 
@@ -230,19 +247,22 @@ fun Application.configureRouting() {
                     call.respond(HttpStatusCode.OK, hospital)
                 }
 
-                // 创建医院
+                // 创建医院（仅管理员）
                 post("/hospitals") {
-                    val hospital = call.receive<HospitalDto.HospitalCreate>()
-                    val hospitalId = hospitalRepository.createHospital(hospital)
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
+                    val hospitalCreate = call.receive<HospitalDto.HospitalCreate>()
+                    val hospitalId = hospitalService.createHospital(operatorId, hospitalCreate)
                     call.respond(HttpStatusCode.Created, mapOf("hospitalId" to hospitalId))
                 }
 
-                // 更新医院信息
+                // 更新医院信息（仅管理员）
                 put("/hospitals/{id}") {
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
                     val id = call.parameters["id"] ?: throw Exception("缺少医院ID")
                     val hospitalUpdate = call.receive<HospitalDto.HospitalUpdate>()
-                    val updatedUpdate = hospitalUpdate.copy(id = id)
-                    val success = hospitalRepository.updateHospital(updatedUpdate)
+                    val success = hospitalService.updateHospital(operatorId, id, hospitalUpdate)
                     if (success) {
                         call.respond(HttpStatusCode.OK, mapOf("success" to true))
                     } else {
@@ -250,10 +270,12 @@ fun Application.configureRouting() {
                     }
                 }
 
-                // 删除医院（软删除）
+                // 删除医院（仅管理员，软删除）
                 delete("/hospitals/{id}") {
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
                     val id = call.parameters["id"] ?: throw Exception("缺少医院ID")
-                    val success = hospitalRepository.deleteHospital(id)
+                    val success = hospitalService.deleteHospital(operatorId, id)
                     if (success) {
                         call.respond(HttpStatusCode.OK, mapOf("success" to true))
                     } else {
@@ -282,19 +304,22 @@ fun Application.configureRouting() {
                     call.respond(HttpStatusCode.OK, department)
                 }
 
-                // 创建部门
+                // 创建部门（仅管理员）
                 post("/departments") {
-                    val department = call.receive<DepartmentDto.DepartmentCreate>()
-                    val departmentId = departmentRepository.createDepartment(department)
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
+                    val departmentCreate = call.receive<DepartmentDto.DepartmentCreate>()
+                    val departmentId = hospitalService.createDepartment(operatorId, departmentCreate)
                     call.respond(HttpStatusCode.Created, mapOf("departmentId" to departmentId))
                 }
 
-                // 更新部门信息
+                // 更新部门信息（仅管理员）
                 put("/departments/{id}") {
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
                     val id = call.parameters["id"] ?: throw Exception("缺少部门ID")
                     val departmentUpdate = call.receive<DepartmentDto.DepartmentUpdate>()
-                    val updatedUpdate = departmentUpdate.copy(id = id)
-                    val success = departmentRepository.updateDepartment(updatedUpdate)
+                    val success = hospitalService.updateDepartment(operatorId, id, departmentUpdate)
                     if (success) {
                         call.respond(HttpStatusCode.OK, mapOf("success" to true))
                     } else {
@@ -302,10 +327,12 @@ fun Application.configureRouting() {
                     }
                 }
 
-                // 删除部门（软删除）
+                // 删除部门（仅管理员，软删除）
                 delete("/departments/{id}") {
+                    val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
                     val id = call.parameters["id"] ?: throw Exception("缺少部门ID")
-                    val success = departmentRepository.deleteDepartment(id)
+                    val success = hospitalService.deleteDepartment(operatorId, id)
                     if (success) {
                         call.respond(HttpStatusCode.OK, mapOf("success" to true))
                     } else {
@@ -313,6 +340,5 @@ fun Application.configureRouting() {
                     }
                 }
             }
-        }
     }
 }

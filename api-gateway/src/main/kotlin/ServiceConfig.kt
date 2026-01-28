@@ -14,7 +14,7 @@ object ServiceConfig {
             "auth" to ServiceConfigItem(
                 name = "认证服务",
                 baseUrl = config?.config("services.auth")?.property("baseUrl")?.getString() ?: "http://localhost:8081",
-                pathPrefix = config?.config("services.auth")?.property("pathPrefix")?.getString() ?: "/auth"
+                pathPrefix = config?.config("services.auth")?.property("pathPrefix")?.getString() ?: "/api/auth"
             ),
             "patient" to ServiceConfigItem(
                 name = "患者服务",
@@ -45,8 +45,8 @@ object ServiceConfig {
      */
     fun isPublicPath(path: String): Boolean {
         val publicPaths = listOf(
-            "/auth/login",
-            "/auth/register"
+            "/api/auth/login",
+            "/api/auth/register"
         )
         return publicPaths.any { path.startsWith(it) }
     }

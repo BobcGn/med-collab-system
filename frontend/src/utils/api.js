@@ -151,4 +151,67 @@ export const authApi = {
     method: 'POST',
     body: JSON.stringify({ token }),
   }),
+
+  // ============ 医院相关 API ============
+  // 获取所有医院
+  getAllHospitals: (includeInactive = false) => {
+    const query = includeInactive ? '?includeInactive=true' : ''
+    return request(`/hospitals${query}`, {
+      method: 'GET',
+    })
+  },
+
+  // 获取指定医院信息
+  getHospitalById: (id) => request(`/hospitals/${id}`, {
+    method: 'GET',
+  }),
+
+  // 创建医院
+  createHospital: (data) => request('/hospitals', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  // 更新医院
+  updateHospital: (id, data) => request(`/hospitals/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+
+  // 删除医院
+  deleteHospital: (id) => request(`/hospitals/${id}`, {
+    method: 'DELETE',
+  }),
+
+  // ============ 部门相关 API ============
+  // 获取指定医院的所有部门
+  getHospitalDepartments: (hospitalId, includeInactive = false) => {
+    const query = includeInactive ? '?includeInactive=true' : ''
+    return request(`/hospitals/${hospitalId}/departments${query}`, {
+      method: 'GET',
+    })
+  },
+
+  // 获取指定部门信息
+  getDepartmentById: (id) => request(`/departments/${id}`, {
+    method: 'GET',
+  }),
+
+  // 创建部门
+  createDepartment: (data) => request('/departments', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  // 更新部门
+  updateDepartment: (id, data) => request(`/departments/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+
+  // 删除部门
+  deleteDepartment: (id) => request(`/departments/${id}`, {
+    method: 'DELETE',
+  }),
 }
+

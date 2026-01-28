@@ -35,7 +35,7 @@ fun Application.configureRouting() {
             call.respondText("Prometheus metrics endpoint", ContentType.Text.Plain)
         }
         // 服务路由 - 认证服务(公开访问)
-        route("/auth") {
+        route("/api/auth") {
             get("/{...}") {
                 forwardToService(call, "auth", jwtUtil, requireAuth = false)
             }
@@ -154,6 +154,7 @@ private suspend fun forwardToService(
         "${service.baseUrl}/$pathWithoutPrefix"
     }
     val targetUrl = "$normalizedPath${if (!call.request.queryString().isNullOrEmpty()) "?${call.request.queryString()}" else ""}"
+
 
     // 转发请求
     call.forwardRequest(targetUrl, call.request.headers)

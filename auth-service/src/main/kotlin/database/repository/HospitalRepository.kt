@@ -91,10 +91,10 @@ class HospitalRepository {
     /**
      * 更新医院信息
      */
-    suspend fun updateHospital(hospital: HospitalDto.HospitalUpdate): Boolean {
+    suspend fun updateHospital(id: String, hospital: HospitalDto.HospitalUpdate): Boolean {
         return try {
             transaction {
-                HospitalEntity.findById(hospital.id)?.let { entity ->
+                HospitalEntity.findById(id)?.let { entity ->
                     hospital.name?.let { entity.name = it }
                     hospital.isActive?.let { entity.isActive = it }
                     true

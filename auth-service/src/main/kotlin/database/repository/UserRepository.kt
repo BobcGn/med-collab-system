@@ -16,21 +16,23 @@ class UserRepository(
     suspend fun createUser(user: UserDto.UserCreate): String{
         return try {
             transaction {
-                val id = Users.insert {
+                val userId = Users.generateId()  // 生成 UUID
+                Users.insert {
+                    it[id] = userId
                     it[hospitalId] = user.hospitalId
                     it[deptCode] = user.deptCode
                     it[userSeq] = user.userSeq
-                    it[username] = user.username
                     it[fullName] = user.fullName
                     it[passwordHash] = user.passwordHash
                     it[role] = user.role
                 } get Users.id
-                id.value
+                userId  // 返回生成的 UUID
             }
         } catch (e: Exception) {
-            throw Exception("创建用户失败")
+            throw Exception("创建用户失败: ${e.message}")
         }
     }
+
 
     /**
      * 根据id查找用户（不包含密码哈希）
@@ -51,7 +53,8 @@ class UserRepository(
                         role = entity.role,
                         createdAt = entity.createdAt.toString(),
                         updatedAt = entity.updatedAt?.toString(),
-                        isDeleted = entity.isDeleted
+                        isDeleted = entity.isDeleted,
+                        isFrozen = entity.isFrozen
                     )
                 }
             }
@@ -80,7 +83,8 @@ class UserRepository(
                         passwordHash = entity.passwordHash,
                         createdAt = entity.createdAt.toString(),
                         updatedAt = entity.updatedAt?.toString(),
-                        isDeleted = entity.isDeleted
+                        isDeleted = entity.isDeleted,
+                        isFrozen = entity.isFrozen
                     )
                 }
             }
@@ -96,26 +100,37 @@ class UserRepository(
      */
     suspend fun findUserByUsername(username: String): UserDto.UserInfo? {
         return try {
-            transaction {
-                UserEntity.find{ Users.username eq username  }
-                    .firstOrNull()
-                    ?.let{entity ->
-                        UserDto.UserInfo(
-                            id = entity.id.value,
-                            hospitalId = entity.hospitalId,
-                            deptCode = entity.deptCode,
-                            userSeq = entity.userSeq,
-                            username = entity.username,
-                            fullName = entity.fullName,
-                            role = entity.role,
-                            createdAt = entity.createdAt.toString(),
-                            updatedAt = entity.updatedAt?.toString(),
-                            isDeleted = entity.isDeleted
-                        )
-                    }
+            // 解析 username: hospitalId-deptCode-userSeq
+            val parts = username.split("-")
+            if (parts.size != 3) {
+                return null
             }
-        }catch (e: Exception){
-            throw Exception("查找用户失败")
+
+            val (hospitalId, deptCode, userSeq) = parts
+
+            transaction {
+                UserEntity.find {
+                    (Users.hospitalId eq hospitalId) and
+                            (Users.deptCode eq deptCode) and
+                            (Users.userSeq eq userSeq)
+                }.firstOrNull()?.let { entity ->
+                    UserDto.UserInfo(
+                        id = entity.id.value,
+                        hospitalId = entity.hospitalId,
+                        deptCode = entity.deptCode,
+                        userSeq = entity.userSeq,
+                        username = entity.username,  // 使用计算属性
+                        fullName = entity.fullName,
+                        role = entity.role,
+                        createdAt = entity.createdAt.toString(),
+                        updatedAt = entity.updatedAt?.toString(),
+                        isDeleted = entity.isDeleted,
+                        isFrozen = entity.isFrozen
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            throw Exception("查找用户失败: ${e.message}")
         }
     }
 
@@ -126,24 +141,46 @@ class UserRepository(
      */
     suspend fun findUserByUsernameWithCredentials(username: String): UserDto.UserInfoWithCredentials? {
         return try {
+            // 解析 username: admin-{userSeq} 或 hospitalId-deptCode-userSeq
+            val parts = username.split("-")
+
             transaction {
-                UserEntity.find{ Users.username eq username  }
-                    .firstOrNull()
-                    ?.let{entity ->
-                        UserDto.UserInfoWithCredentials(
-                            id = entity.id.value,
-                            hospitalId = entity.hospitalId,
-                            deptCode = entity.deptCode,
-                            userSeq = entity.userSeq,
-                            username = entity.username,
-                            fullName = entity.fullName,
-                            role = entity.role,
-                            passwordHash = entity.passwordHash,
-                            createdAt = entity.createdAt.toString(),
-                            updatedAt = entity.updatedAt?.toString(),
-                            isDeleted = entity.isDeleted
-                        )
-                    }
+                val entity = if (parts.size == 2 && parts[0] == "admin") {
+                    // 管理员用户名格式: admin-{userSeq}
+                    val userSeq = parts[1]
+                    UserEntity.find {
+                        (Users.hospitalId.isNull()) and
+                        (Users.deptCode.isNull()) and
+                        (Users.userSeq eq userSeq)
+                    }.firstOrNull()
+                } else if (parts.size == 3) {
+                    // 普通用户名格式: hospitalId-deptCode-userSeq
+                    val (hospitalId, deptCode, userSeq) = parts
+                    UserEntity.find {
+                        (Users.hospitalId eq hospitalId) and
+                        (Users.deptCode eq deptCode) and
+                        (Users.userSeq eq userSeq)
+                    }.firstOrNull()
+                } else {
+                    return@transaction null
+                }
+
+                entity?.let {
+                    UserDto.UserInfoWithCredentials(
+                        id = it.id.value,
+                        hospitalId = it.hospitalId,
+                        deptCode = it.deptCode,
+                        userSeq = it.userSeq,
+                        username = it.username,
+                        fullName = it.fullName,
+                        role = it.role,
+                        passwordHash = it.passwordHash,
+                        createdAt = it.createdAt.toString(),
+                        updatedAt = it.updatedAt?.toString(),
+                        isDeleted = it.isDeleted,
+                        isFrozen = it.isFrozen
+                    )
+                }
             }
         }catch (e: Exception){
             throw Exception("查找用户失败")
@@ -157,11 +194,13 @@ class UserRepository(
      */
     suspend fun updateUser(userUpdate: UserDto.UserUpdate): Boolean{
         return try {
+            val userId = userUpdate.id ?: throw Exception("缺少用户ID")
             transaction {
-                UserEntity.findById(userUpdate.id)?.let{ user ->
+                UserEntity.findById(userId)?.let{ user ->
                     userUpdate.fullName?.let{ user.fullName = it}
                     userUpdate.passwordHash?.let { user.passwordHash = it }
                     userUpdate.role?.let { user.role = it }
+                    userUpdate.isFrozen?.let { user.isFrozen = it }
                     true
                 }?: false
             }
@@ -209,7 +248,8 @@ class UserRepository(
                         role = entity.role,
                         createdAt = entity.createdAt.toString(),
                         updatedAt = entity.updatedAt?.toString(),
-                        isDeleted = entity.isDeleted
+                        isDeleted = entity.isDeleted,
+                        isFrozen = entity.isFrozen
                     )
                 }
             }
@@ -225,8 +265,31 @@ class UserRepository(
      */
     suspend fun existsByUsername(username: String): Boolean{
         return try {
+            // 解析 username: admin-{userSeq} 或 hospitalId-deptCode-userSeq
+            val parts = username.split("-")
+
             transaction {
-                !UserEntity.find { Users.username eq username }.empty()
+                val result = if (parts.size == 2 && parts[0] == "admin") {
+                    // 管理员用户名格式: admin-{userSeq}
+                    val userSeq = parts[1]
+                    UserEntity.find {
+                        (Users.hospitalId.isNull()) and
+                        (Users.deptCode.isNull()) and
+                        (Users.userSeq eq userSeq)
+                    }
+                } else if (parts.size == 3) {
+                    // 普通用户名格式: hospitalId-deptCode-userSeq
+                    val (hospitalId, deptCode, userSeq) = parts
+                    UserEntity.find {
+                        (Users.hospitalId eq hospitalId) and
+                        (Users.deptCode eq deptCode) and
+                        (Users.userSeq eq userSeq)
+                    }
+                } else {
+                    return@transaction false
+                }
+
+                !result.empty()
             }
         }catch (e: Exception){
             throw Exception("检查用户失败")
@@ -302,7 +365,8 @@ class UserRepository(
                             role = it.role,
                             createdAt = it.createdAt.toString(),
                             updatedAt = it.updatedAt?.toString(),
-                            isDeleted = it.isDeleted
+                            isDeleted = it.isDeleted,
+                            isFrozen = it.isFrozen
                         )
                     }
             }
@@ -320,7 +384,12 @@ class UserRepository(
         return try {
             transaction {
                 UserEntity.find {
-                    (Users.username like "%$keyword%") or (Users.fullName like "%$keyword%")
+                    // 搜索 fullName 和 username 的组成部分
+                    // 注意：hospitalId 和 deptCode 可能为 null，需要使用 coalesce 或单独处理
+                    (Users.fullName like "%$keyword%") or
+                    (Users.hospitalId like "%$keyword%") or
+                    (Users.deptCode like "%$keyword%") or
+                    (Users.userSeq like "%$keyword%")
                 }
                 .map {
                     UserDto.UserInfo(
@@ -333,7 +402,8 @@ class UserRepository(
                         role = it.role,
                         createdAt = it.createdAt.toString(),
                         updatedAt = it.updatedAt?.toString(),
-                        isDeleted = it.isDeleted
+                        isDeleted = it.isDeleted,
+                        isFrozen = it.isFrozen
                     )
                 }
             }
@@ -362,7 +432,8 @@ class UserRepository(
                         role = it.role,
                         createdAt = it.createdAt.toString(),
                         updatedAt = it.updatedAt?.toString(),
-                        isDeleted = it.isDeleted
+                        isDeleted = it.isDeleted,
+                        isFrozen = it.isFrozen
                     )
                 }
             }

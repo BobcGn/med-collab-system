@@ -13,7 +13,6 @@
           <option value="">全部角色</option>
           <option value="admin">管理员</option>
           <option value="doctor">医生</option>
-          <option value="nurse">护士</option>
         </select>
         <button @click="fetchUsers">刷新</button>
       </div>

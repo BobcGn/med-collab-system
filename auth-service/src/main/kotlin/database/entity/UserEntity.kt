@@ -12,13 +12,17 @@ class UserEntity(id: EntityID<String>) : Entity<String>(id) {
     var hospitalId by Users.hospitalId
     var deptCode by Users.deptCode
     var userSeq by Users.userSeq
-    var username by Users.username
     var fullName by Users.fullName
     var passwordHash by Users.passwordHash
     var role by Users.role
     var isDeleted by Users.isDeleted
+    var isFrozen by Users.isFrozen  // 添加冻结状态
     var createdAt by Users.createdAt
     var updatedAt by Users.updatedAt
+
+    // 计算属性: username (管理员为 admin-{user_seq}，普通用户为 {hospitalId}-{deptCode}-{userSeq})
+    val username: String
+        get() = if (hospitalId == null) "admin-$userSeq" else "$hospitalId-$deptCode-$userSeq"
 
     fun UserEntity.toUserInfo() = UserDto.UserInfo(
         id = id.value,
@@ -29,6 +33,8 @@ class UserEntity(id: EntityID<String>) : Entity<String>(id) {
         fullName = fullName,
         role = role,
         createdAt = createdAt.toString(),
-        updatedAt = updatedAt?.toString()
+        updatedAt = updatedAt?.toString(),
+        isDeleted = isDeleted,
+        isFrozen = isFrozen
     )
 }

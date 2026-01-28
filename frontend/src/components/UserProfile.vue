@@ -16,8 +16,8 @@
           <h3>基本信息</h3>
           <div class="info-grid">
             <div class="info-item">
-              <label>用户ID</label>
-              <span>{{ user.id }}</span>
+              <label>用户账号</label>
+              <span>{{ user.username || '-' }}</span>
             </div>
             <div class="info-item">
               <label>医院ID</label>
@@ -32,8 +32,8 @@
               <span>{{ user.userSeq }}</span>
             </div>
             <div class="info-item">
-              <label>用户名</label>
-              <span>{{ user.username || '-' }}</span>
+              <label>真实姓名</label>
+              <span>{{ user.fullName }}</span>
             </div>
             <div class="info-item">
               <label>创建时间</label>
@@ -46,7 +46,7 @@
           <h3>快捷操作</h3>
           <div class="actions">
             <button @click="showChangePassword = true">修改密码</button>
-            <button @click="showChangeUsername = true">修改用户名</button>
+            <button v-if="isAdmin" @click="showChangeUsername = true">修改用户名</button>
           </div>
         </div>
       </div>
@@ -90,8 +90,8 @@
         </div>
       </div>
 
-      <!-- 修改用户名对话框 -->
-      <div v-if="showChangeUsername" class="modal-overlay" @click="closeModals">
+      <!-- 修改用户名对话框（仅管理员可见） -->
+      <div v-if="isAdmin && showChangeUsername" class="modal-overlay" @click="closeModals">
         <div class="modal" @click.stop>
           <h3>修改用户名</h3>
           <form @submit.prevent="handleUsernameChange">
@@ -116,7 +116,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { authApi } from '../utils/api'
 
 const user = ref(null)
@@ -137,6 +137,9 @@ const passwordForm = ref({
 const usernameForm = ref({
   newUsername: '',
 })
+
+// 是否为管理员（仅管理员可以修改用户名）
+const isAdmin = computed(() => user.value?.role === 'admin')
 
 const fetchCurrentUser = async () => {
   loading.value = true
@@ -223,22 +226,22 @@ onMounted(() => {
 
 <style scoped>
 .profile-container {
-  max-width: 800px;
-  margin: 2rem auto;
-  padding: 0 1rem;
+  max-width: 960px;
+  margin: 1.5rem auto 0;
+  padding: 0 1rem 2rem;
 }
 
 .profile-card {
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
   overflow: hidden;
 }
 
 .profile-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #4c6fff 0%, #764ba2 100%);
   color: white;
-  padding: 2rem;
+  padding: 2.25rem 2rem 1.75rem;
   text-align: center;
 }
 
@@ -281,7 +284,7 @@ onMounted(() => {
 }
 
 .section {
-  padding: 1.5rem;
+  padding: 1.75rem 2rem;
   border-bottom: 1px solid #f0f0f0;
 }
 
@@ -319,22 +322,29 @@ onMounted(() => {
 
 .actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .actions button {
-  padding: 0.75rem 1.5rem;
-  background: #667eea;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  padding: 0.6rem 1.4rem;
+  background: #f3f4ff;
+  color: #4c6fff;
+  border: 1px solid #d6dcff;
+  border-radius: 999px;
   font-size: 0.875rem;
   cursor: pointer;
-  transition: background 0.2s;
+  font-weight: 500;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    box-shadow 0.2s;
 }
 
 .actions button:hover {
-  background: #5568d3;
+  background: #4c6fff;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(76, 111, 255, 0.3);
 }
 
 .modal-overlay {

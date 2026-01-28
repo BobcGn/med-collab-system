@@ -33,6 +33,12 @@ const routes = [
     meta: { requiresAuth: true, requiresRole: 'admin' },
   },
   {
+    path: '/manage/hospitals',
+    name: 'HospitalManage',
+    component: () => import('../components/HospitalManage.vue'),
+    meta: { requiresAuth: true, requiresRole: 'admin' },
+  },
+  {
     path: '/',
     name: 'Home',
     redirect: '/profile',

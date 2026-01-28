@@ -1,9 +1,12 @@
 package dto
 
+import kotlinx.serialization.Serializable
+
 sealed class HospitalDto {
     /**
      * 医院基本信息
      */
+    @Serializable
     data class HospitalInfo(
         val id: String,
         val name: String,
@@ -15,6 +18,7 @@ sealed class HospitalDto {
     /**
      * 医院创建数据类
      */
+    @Serializable
     data class HospitalCreate(
         val id: String,
         val name: String
@@ -23,9 +27,11 @@ sealed class HospitalDto {
     /**
      * 医院更新数据类
      */
+    @Serializable
     data class HospitalUpdate(
-        val id: String,
         val name: String? = null,
         val isActive: Boolean? = null
     ) : HospitalDto()
 }
+
+
