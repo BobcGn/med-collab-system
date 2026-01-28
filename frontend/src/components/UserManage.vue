@@ -35,8 +35,8 @@
                 <th>真实姓名</th>
                 <th>用户名</th>
                 <th>角色</th>
-                <th>医院ID</th>
-                <th>科室</th>
+                <th>所属医院</th>
+                <th>所属科室</th>
                 <th>创建时间</th>
                 <th>操作</th>
               </tr>
@@ -48,8 +48,8 @@
                 <td>
                   <span class="role-badge" :class="user.role">{{ user.role }}</span>
                 </td>
-                <td>{{ user.hospitalId }}</td>
-                <td>{{ user.deptCode }}</td>
+                <td>{{ user.hospitalName || user.hospitalId || '-' }}</td>
+                <td>{{ user.deptName || user.deptCode || '-' }}</td>
                 <td>{{ formatDate(user.createdAt) }}</td>
                 <td class="actions">
                   <button @click="viewUser(user)" class="btn-small">查看</button>
@@ -190,12 +190,12 @@
             <span class="value role-badge" :class="selectedUser?.role">{{ selectedUser?.role }}</span>
           </div>
           <div class="detail-row">
-            <span class="label">医院ID:</span>
-            <span class="value">{{ selectedUser?.hospitalId }}</span>
+            <span class="label">所属医院:</span>
+            <span class="value">{{ selectedUser?.hospitalName || selectedUser?.hospitalId || '-' }}</span>
           </div>
           <div class="detail-row">
-            <span class="label">科室代码:</span>
-            <span class="value">{{ selectedUser?.deptCode }}</span>
+            <span class="label">所属科室:</span>
+            <span class="value">{{ selectedUser?.deptName || selectedUser?.deptCode || '-' }}</span>
           </div>
           <div class="detail-row">
             <span class="label">用户序号:</span>

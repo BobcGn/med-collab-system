@@ -14,35 +14,78 @@ const routes = [
     component: () => import('../components/RegisterForm.vue'),
     meta: { requiresAuth: false },
   },
-  {
-    path: '/profile',
-    name: 'Profile',
-    component: () => import('../components/UserProfile.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/users',
-    name: 'Users',
-    component: () => import('../components/UserList.vue'),
-    meta: { requiresAuth: true },
-  },
-  {
-    path: '/manage/users',
-    name: 'UserManage',
-    component: () => import('../components/UserManage.vue'),
-    meta: { requiresAuth: true, requiresRole: 'admin' },
-  },
-  {
-    path: '/manage/hospitals',
-    name: 'HospitalManage',
-    component: () => import('../components/HospitalManage.vue'),
-    meta: { requiresAuth: true, requiresRole: 'admin' },
-  },
+  // 主布局路由
   {
     path: '/',
-    name: 'Home',
-    redirect: '/profile',
+    component: () => import('../components/MainLayout.vue'),
     meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        redirect: '/dashboard'
+      },
+      {
+        path: 'dashboard',
+        name: 'Dashboard',
+        component: () => import('../components/Dashboard.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'profile',
+        name: 'Profile',
+        component: () => import('../components/UserProfile.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'notifications',
+        name: 'Notifications',
+        component: () => import('../components/Notifications.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'help',
+        name: 'HelpCenter',
+        component: () => import('../components/HelpCenter.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'announcements',
+        name: 'Announcements',
+        component: () => import('../components/Announcements.vue'),
+        meta: { requiresAuth: true },
+      },
+      // 管理员路由
+      {
+        path: 'manage/users',
+        name: 'UserManage',
+        component: () => import('../components/UserManage.vue'),
+        meta: { requiresAuth: true, requiresRole: 'admin' },
+      },
+      {
+        path: 'manage/hospitals',
+        name: 'HospitalManage',
+        component: () => import('../components/HospitalManage.vue'),
+        meta: { requiresAuth: true, requiresRole: 'admin' },
+      },
+      // 用户路由
+      {
+        path: 'patients',
+        name: 'PatientManage',
+        component: () => import('../components/PatientManage.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'reports',
+        name: 'ReportManage',
+        component: () => import('../components/ReportManage.vue'),
+        meta: { requiresAuth: true },
+      },
+    ]
+  },
+  // 兼容旧路由
+  {
+    path: '/users',
+    redirect: '/manage/users'
   },
 ]
 
@@ -52,7 +95,7 @@ const router = createRouter({
 })
 
 // 路由守卫
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, _from, next) => {
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth)
   const isAuthenticated = authStore.isAuthenticated()
 

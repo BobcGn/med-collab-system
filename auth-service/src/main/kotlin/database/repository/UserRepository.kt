@@ -1,7 +1,11 @@
 package com.example.database.repository
 
 import database.entity.UserEntity
+import database.entity.HospitalEntity
+import database.entity.DepartmentEntity
 import database.table.Users
+import database.table.Hospitals
+import database.table.Departments
 import dto.UserDto
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
@@ -43,10 +47,29 @@ class UserRepository(
         return try {
             transaction {
                 UserEntity.findById(id)?.let { entity ->
+                    // 获取医院名称
+                    val hospitalName = if (entity.hospitalId != null) {
+                        HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
+                    } else {
+                        null
+                    }
+
+                    // 获取科室名称
+                    val deptName = if (entity.hospitalId != null && entity.deptCode != null) {
+                        DepartmentEntity.find {
+                            (Departments.id eq entity.deptCode) and
+                            (Departments.hospitalId eq entity.hospitalId!!)
+                        }.firstOrNull()?.name ?: entity.deptCode
+                    } else {
+                        null
+                    }
+
                     UserDto.UserInfo(
                         id = entity.id.value,
                         hospitalId = entity.hospitalId,
                         deptCode = entity.deptCode,
+                        hospitalName = hospitalName,
+                        deptName = deptName,
                         userSeq = entity.userSeq,
                         username = entity.username,
                         fullName = entity.fullName,
@@ -114,12 +137,31 @@ class UserRepository(
                             (Users.deptCode eq deptCode) and
                             (Users.userSeq eq userSeq)
                 }.firstOrNull()?.let { entity ->
+                    // 获取医院名称
+                    val hospitalName = if (entity.hospitalId != null) {
+                        HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
+                    } else {
+                        null
+                    }
+
+                    // 获取科室名称
+                    val deptName = if (entity.hospitalId != null && entity.deptCode != null) {
+                        DepartmentEntity.find {
+                            (Departments.id eq entity.deptCode) and
+                            (Departments.hospitalId eq entity.hospitalId!!)
+                        }.firstOrNull()?.name ?: entity.deptCode
+                    } else {
+                        null
+                    }
+
                     UserDto.UserInfo(
                         id = entity.id.value,
                         hospitalId = entity.hospitalId,
                         deptCode = entity.deptCode,
+                        hospitalName = hospitalName,
+                        deptName = deptName,
                         userSeq = entity.userSeq,
-                        username = entity.username,  // 使用计算属性
+                        username = entity.username,
                         fullName = entity.fullName,
                         role = entity.role,
                         createdAt = entity.createdAt.toString(),
@@ -146,7 +188,7 @@ class UserRepository(
 
             transaction {
                 val entity = if (parts.size == 2 && parts[0] == "admin") {
-                    // 管理员用户名格式: admin-{userSeq}
+                    // 管理员账号格式: admin-{userSeq}
                     val userSeq = parts[1]
                     UserEntity.find {
                         (Users.hospitalId.isNull()) and
@@ -154,7 +196,7 @@ class UserRepository(
                         (Users.userSeq eq userSeq)
                     }.firstOrNull()
                 } else if (parts.size == 3) {
-                    // 普通用户名格式: hospitalId-deptCode-userSeq
+                    // 普通用户账号格式: hospitalId-deptCode-userSeq
                     val (hospitalId, deptCode, userSeq) = parts
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
@@ -166,10 +208,29 @@ class UserRepository(
                 }
 
                 entity?.let {
+                    // 获取医院名称
+                    val hospitalName = it.hospitalId?.let { hospitalId ->
+                        HospitalEntity.findById(hospitalId)?.name
+                    }
+
+                    // 获取科室名称
+                    val deptName = if (it.hospitalId != null && it.deptCode != null) {
+                        val tempHospitalId = it.hospitalId
+                        val tempDeptCode = it.deptCode
+                        DepartmentEntity.find {
+                            (Departments.id eq tempDeptCode) and
+                                    (Departments.hospitalId eq tempHospitalId!!)
+                        }.firstOrNull()?.name
+                    } else {
+                        null
+                    }
+
                     UserDto.UserInfoWithCredentials(
                         id = it.id.value,
                         hospitalId = it.hospitalId,
                         deptCode = it.deptCode,
+                        hospitalName = hospitalName,
+                        deptName = deptName,
                         userSeq = it.userSeq,
                         username = it.username,
                         fullName = it.fullName,
@@ -236,12 +297,22 @@ class UserRepository(
             transaction {
                 UserEntity.find{
                     (Users.hospitalId eq hospitalId) and (Users.deptCode eq deptCode)
-                }.map{
-                    entity ->
+                }.map{ entity ->
+                    // 获取医院名称
+                    val hospitalName = HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
+
+                    // 获取科室名称
+                    val deptName = DepartmentEntity.find {
+                        (Departments.id eq entity.deptCode) and
+                        (Departments.hospitalId eq entity.hospitalId!!)
+                    }.firstOrNull()?.name ?: entity.deptCode
+
                     UserDto.UserInfo(
                         id = entity.id.value,
                         hospitalId = entity.hospitalId,
                         deptCode = entity.deptCode,
+                        hospitalName = hospitalName,
+                        deptName = deptName,
                         userSeq = entity.userSeq,
                         username = entity.username,
                         fullName = entity.fullName,
@@ -354,19 +425,38 @@ class UserRepository(
                 query
                     .limit(size)
                     .offset(page.toLong() * size)
-                    .map {
+                    .map { entity ->
+                        // 获取医院名称
+                        val hospitalName = if (entity.hospitalId != null) {
+                            HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
+                        } else {
+                            null
+                        }
+
+                        // 获取科室名称
+                        val deptName = if (entity.hospitalId != null && entity.deptCode != null) {
+                            DepartmentEntity.find {
+                                (Departments.id eq entity.deptCode) and
+                                (Departments.hospitalId eq entity.hospitalId!!)
+                            }.firstOrNull()?.name ?: entity.deptCode
+                        } else {
+                            null
+                        }
+
                         UserDto.UserInfo(
-                            id = it.id.value,
-                            hospitalId = it.hospitalId,
-                            deptCode = it.deptCode,
-                            userSeq = it.userSeq,
-                            username = it.username,
-                            fullName = it.fullName,
-                            role = it.role,
-                            createdAt = it.createdAt.toString(),
-                            updatedAt = it.updatedAt?.toString(),
-                            isDeleted = it.isDeleted,
-                            isFrozen = it.isFrozen
+                            id = entity.id.value,
+                            hospitalId = entity.hospitalId,
+                            deptCode = entity.deptCode,
+                            hospitalName = hospitalName,
+                            deptName = deptName,
+                            userSeq = entity.userSeq,
+                            username = entity.username,
+                            fullName = entity.fullName,
+                            role = entity.role,
+                            createdAt = entity.createdAt.toString(),
+                            updatedAt = entity.updatedAt?.toString(),
+                            isDeleted = entity.isDeleted,
+                            isFrozen = entity.isFrozen
                         )
                     }
             }
@@ -391,19 +481,38 @@ class UserRepository(
                     (Users.deptCode like "%$keyword%") or
                     (Users.userSeq like "%$keyword%")
                 }
-                .map {
+                .map { entity ->
+                    // 获取医院名称
+                    val hospitalName = if (entity.hospitalId != null) {
+                        HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
+                    } else {
+                        null
+                    }
+
+                    // 获取科室名称
+                    val deptName = if (entity.hospitalId != null && entity.deptCode != null) {
+                        DepartmentEntity.find {
+                            (Departments.id eq entity.deptCode) and
+                            (Departments.hospitalId eq entity.hospitalId!!)
+                        }.firstOrNull()?.name ?: entity.deptCode
+                    } else {
+                        null
+                    }
+
                     UserDto.UserInfo(
-                        id = it.id.value,
-                        hospitalId = it.hospitalId,
-                        deptCode = it.deptCode,
-                        userSeq = it.userSeq,
-                        username = it.username,
-                        fullName = it.fullName,
-                        role = it.role,
-                        createdAt = it.createdAt.toString(),
-                        updatedAt = it.updatedAt?.toString(),
-                        isDeleted = it.isDeleted,
-                        isFrozen = it.isFrozen
+                        id = entity.id.value,
+                        hospitalId = entity.hospitalId,
+                        deptCode = entity.deptCode,
+                        hospitalName = hospitalName,
+                        deptName = deptName,
+                        userSeq = entity.userSeq,
+                        username = entity.username,
+                        fullName = entity.fullName,
+                        role = entity.role,
+                        createdAt = entity.createdAt.toString(),
+                        updatedAt = entity.updatedAt?.toString(),
+                        isDeleted = entity.isDeleted,
+                        isFrozen = entity.isFrozen
                     )
                 }
             }
@@ -421,19 +530,34 @@ class UserRepository(
         return try {
             transaction {
                 UserEntity.find { Users.hospitalId eq hospitalId }
-                .map {
+                .map { entity ->
+                    // 获取医院名称
+                    val hospitalName = HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
+
+                    // 获取科室名称
+                    val deptName = if (entity.deptCode != null) {
+                        DepartmentEntity.find {
+                            (Departments.id eq entity.deptCode) and
+                            (Departments.hospitalId eq entity.hospitalId!!)
+                        }.firstOrNull()?.name ?: entity.deptCode
+                    } else {
+                        null
+                    }
+
                     UserDto.UserInfo(
-                        id = it.id.value,
-                        hospitalId = it.hospitalId,
-                        deptCode = it.deptCode,
-                        userSeq = it.userSeq,
-                        username = it.username,
-                        fullName = it.fullName,
-                        role = it.role,
-                        createdAt = it.createdAt.toString(),
-                        updatedAt = it.updatedAt?.toString(),
-                        isDeleted = it.isDeleted,
-                        isFrozen = it.isFrozen
+                        id = entity.id.value,
+                        hospitalId = entity.hospitalId,
+                        deptCode = entity.deptCode,
+                        hospitalName = hospitalName,
+                        deptName = deptName,
+                        userSeq = entity.userSeq,
+                        username = entity.username,
+                        fullName = entity.fullName,
+                        role = entity.role,
+                        createdAt = entity.createdAt.toString(),
+                        updatedAt = entity.updatedAt?.toString(),
+                        isDeleted = entity.isDeleted,
+                        isFrozen = entity.isFrozen
                     )
                 }
             }

@@ -20,12 +20,12 @@
               <span>{{ user.username || '-' }}</span>
             </div>
             <div class="info-item">
-              <label>医院ID</label>
-              <span>{{ user.hospitalId }}</span>
+              <label>所属医院</label>
+              <span>{{ user.hospitalName || user.hospitalId || '-' }}</span>
             </div>
             <div class="info-item">
-              <label>科室代码</label>
-              <span>{{ user.deptCode }}</span>
+              <label>所属科室</label>
+              <span>{{ user.deptName || user.deptCode || '-' }}</span>
             </div>
             <div class="info-item">
               <label>用户序号</label>
@@ -118,6 +118,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { authApi } from '../utils/api'
+import { authStore } from '../utils/auth'
 
 const user = ref(null)
 const loading = ref(false)
@@ -146,7 +147,10 @@ const fetchCurrentUser = async () => {
   error.value = ''
 
   try {
-    user.value = await authApi.getCurrentUser()
+    const userData = await authApi.getCurrentUser()
+    user.value = userData
+    // 更新localStorage中的用户数据，确保包含最新的字段
+    authStore.setCurrentUser(userData)
   } catch (err) {
     error.value = err.message || '获取用户信息失败'
   } finally {

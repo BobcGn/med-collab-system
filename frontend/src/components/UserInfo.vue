@@ -9,12 +9,12 @@
         <span class="value">{{ user.id }}</span>
       </div>
       <div class="info-row">
-        <span class="label">医院ID:</span>
-        <span class="value">{{ user.hospitalId }}</span>
+        <span class="label">所属医院:</span>
+        <span class="value">{{ user.hospitalName || user.hospitalId || '-' }}</span>
       </div>
       <div class="info-row">
-        <span class="label">科室代码:</span>
-        <span class="value">{{ user.deptCode }}</span>
+        <span class="label">所属科室:</span>
+        <span class="value">{{ user.deptName || user.deptCode || '-' }}</span>
       </div>
       <div class="info-row">
         <span class="label">用户序号:</span>
