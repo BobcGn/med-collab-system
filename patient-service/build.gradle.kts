@@ -16,12 +16,21 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation-jvm:3.3.2")
     implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:3.3.2")
 
-    // Ktor Auth
-    implementation("io.ktor:ktor-server-auth-jvm:3.3.2")
-    implementation("io.ktor:ktor-server-auth-jwt-jvm:3.3.2")
+    // Ktor Server Auth (JWT)
+    implementation("io.ktor:ktor-server-auth-jwt:3.3.2")
+    implementation("io.ktor:ktor-server-auth:3.3.2")
+
+    // Ktor Client (for inter-service communication)
+    implementation("io.ktor:ktor-client-core-jvm:3.3.2")
+    implementation("io.ktor:ktor-client-cio-jvm:3.3.2")
+    implementation("io.ktor:ktor-client-content-negotiation-jvm:3.3.2")
+    implementation("io.ktor:ktor-client-serialization-jvm:3.3.2")
+    implementation("io.ktor:ktor-client-logging-jvm:3.3.2")
 
     // Ktor Config (YAML)
     implementation("io.ktor:ktor-server-config-yaml:3.3.2")
+    implementation("io.ktor:ktor-server-host-common-jvm:3.3.2")
+    implementation("io.ktor:ktor-server-status-pages-jvm:3.3.2")
 
     // Shared Module
     implementation(project(":shared"))

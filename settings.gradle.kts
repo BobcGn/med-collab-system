@@ -3,6 +3,7 @@ rootProject.name = "med-collab-system"
 dependencyResolutionManagement {
     repositories {
         mavenCentral()
+        gradlePluginPortal()
     }
 }
 

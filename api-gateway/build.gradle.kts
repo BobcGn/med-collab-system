@@ -16,20 +16,17 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation-jvm:3.3.2")
     implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:3.3.2")
 
+    // Ktor Server Auth (JWT)
+    implementation("io.ktor:ktor-server-auth-jwt:3.3.2")
+    implementation("io.ktor:ktor-server-auth:3.3.2")
+
     // Ktor Server Metrics
     implementation("io.ktor:ktor-server-metrics-micrometer-jvm:3.3.2")
-    implementation("io.micrometer:micrometer-registry-prometheus:1.12.0")
-
-    // Ktor Server Auth (JWT)
-    implementation("io.ktor:ktor-server-auth-jvm:3.3.2")
-    implementation("io.ktor:ktor-server-auth-jwt-jvm:3.3.2")
+    implementation("io.micrometer:micrometer-registry-prometheus:1.13.6")
 
     // Ktor Client (用于请求转发)
     implementation("io.ktor:ktor-client-core-jvm:3.3.2")
     implementation("io.ktor:ktor-client-cio-jvm:3.3.2")
-
-    // Micrometer
-    implementation("io.micrometer:micrometer-registry-prometheus:1.13.6")
 
     // Shared Module
     implementation(project(":shared"))

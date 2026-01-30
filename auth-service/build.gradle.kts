@@ -18,9 +18,14 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation-jvm:3.3.2")
     implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:3.3.2")
 
-    // Ktor Auth
-    implementation("io.ktor:ktor-server-auth-jvm:3.3.2")
-    implementation("io.ktor:ktor-server-auth-jwt-jvm:3.3.2")
+    // Ktor Server Auth (JWT)
+    implementation("io.ktor:ktor-server-auth-jwt:3.3.2")
+    implementation("io.ktor:ktor-server-auth:3.3.2")
+
+    // Ktor Server Config
+    implementation("io.ktor:ktor-server-config-yaml:3.3.2")
+    implementation("io.ktor:ktor-server-host-common-jvm:3.3.2")
+    implementation("io.ktor:ktor-server-status-pages-jvm:3.3.2")
 
     // Shared Module
     implementation(project(":shared"))
@@ -32,13 +37,8 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-java-time:0.61.0")
     implementation("com.mysql:mysql-connector-j:8.4.0")
 
-
     // Logging
     implementation("ch.qos.logback:logback-classic:1.4.14")
-    implementation("io.ktor:ktor-server-core:3.3.2")
-    implementation("io.ktor:ktor-server-host-common:3.3.2")
-    implementation("io.ktor:ktor-server-status-pages:3.3.2")
-    implementation("io.ktor:ktor-server-core:3.3.2")
 
     // Testing
     testImplementation("io.ktor:ktor-server-test-host-jvm:3.3.2")
