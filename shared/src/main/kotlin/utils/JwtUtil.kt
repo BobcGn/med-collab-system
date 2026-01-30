@@ -1,42 +1,23 @@
 package utils
 
-import io.jsonwebtoken.*
-import io.jsonwebtoken.security.Keys
-import io.jsonwebtoken.security.SecurityException
-import io.ktor.server.config.ApplicationConfig
-import javax.crypto.SecretKey
+import com.auth0.jwt.JWTVerifier
+import io.ktor.server.config.*
 import java.util.*
 
+/**
+ * JWT 工具类 - 使用 Ktor JWT 实现
+ */
 class JwtUtil(config: ApplicationConfig) {
     private val secret: String = config.property("jwt.secret").getString()
     private val jwtExpiration: Long = config.property("jwt.expiration").getString().toLong()
     private val audience: String = config.property("jwt.audience").getString()
     private val issuer: String = config.property("jwt.issuer").getString()
 
-    private val secretKey: SecretKey by lazy {
-        Keys.hmacShaKeyFor(secret.toByteArray())
-    }
-
-    /**
-     * 为指定用户生成JWT令牌
-     *
-     * @param userId 用户ID
-     * @param username 用户名
-     * @return 生成的JWT令牌字符串
-     */
-    fun generateToken(userId: String, username: String): String {
-        val now = Date()
-        val expiryDate = Date(now.time + jwtExpiration * 1000)
-
-        return Jwts.builder()
-            .setSubject(userId)
-            .claim("username", username)
-            .setIssuedAt(now)
-            .setExpiration(expiryDate)
-            .setIssuer(issuer)
-            .setAudience(audience)
-            .signWith(secretKey, SignatureAlgorithm.HS512)
-            .compact()
+    private val verifier: JWTVerifier by lazy {
+        val algorithm = com.auth0.jwt.algorithms.Algorithm.HMAC256(secret)
+        com.auth0.jwt.JWT.require(algorithm)
+            .withIssuer(issuer)
+            .build()
     }
 
     /**
@@ -51,16 +32,29 @@ class JwtUtil(config: ApplicationConfig) {
         val now = Date()
         val expiryDate = Date(now.time + jwtExpiration * 1000)
 
-        return Jwts.builder()
-            .setSubject(userId)
-            .claim("username", username)
-            .addClaims(customClaims)
-            .setIssuedAt(now)
-            .setExpiration(expiryDate)
-            .setIssuer(issuer)
-            .setAudience(audience)
-            .signWith(secretKey, SignatureAlgorithm.HS512)
-            .compact()
+        val algorithm = com.auth0.jwt.algorithms.Algorithm.HMAC256(secret)
+
+        val tokenBuilder = com.auth0.jwt.JWT.create()
+            .withSubject(userId)
+            .withIssuer(issuer)
+            .withAudience(audience)
+            .withClaim("username", username)
+            .withIssuedAt(now)
+            .withExpiresAt(expiryDate)
+
+        // 添加自定义声明
+        customClaims.forEach { (key, value) ->
+            when (value) {
+                is String -> tokenBuilder.withClaim(key, value)
+                is Int -> tokenBuilder.withClaim(key, value)
+                is Double -> tokenBuilder.withClaim(key, value)
+                is Long -> tokenBuilder.withClaim(key, value)
+                is Boolean -> tokenBuilder.withClaim(key, value)
+                else -> tokenBuilder.withClaim(key, value.toString())
+            }
+        }
+
+        return tokenBuilder.sign(algorithm)
     }
 
     /**
@@ -70,11 +64,11 @@ class JwtUtil(config: ApplicationConfig) {
      * @return 令牌有效返回true，否则返回false
      */
     fun validateToken(token: String): Boolean {
-        try {
-            parseToken(token)
-            return true
+        return try {
+            verifier.verify(token)
+            true
         } catch (e: Exception) {
-            return false
+            false
         }
     }
 
@@ -86,7 +80,8 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getUserIdFromToken(token: String): String? {
         return try {
-            parseToken(token).subject
+            val principal = verifier.verify(token)
+            principal.subject
         } catch (e: Exception) {
             println("解析令牌失败: ${e.message}")
             null
@@ -101,7 +96,8 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getUsernameFromToken(token: String): String? {
         return try {
-            parseToken(token).get("username", String::class.java)
+            val principal = verifier.verify(token)
+            principal.getClaim("username").asString()
         } catch (e: Exception) {
             println("解析用户名失败: ${e.message}")
             null
@@ -117,7 +113,20 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun <T> getClaimFromToken(token: String, key: String, clazz: Class<T>): T? {
         return try {
-            parseToken(token).get(key, clazz)
+            val principal = verifier.verify(token)
+            val claim = principal.getClaim(key)
+            if (claim.isNull) {
+                null
+            } else {
+                when (clazz) {
+                    String::class.java -> claim.asString() as T
+                    Int::class.java -> claim.asInt() as T
+                    Long::class.java -> claim.asLong() as T
+                    Boolean::class.java -> claim.asBoolean() as T
+                    Double::class.java -> claim.asDouble() as T
+                    else -> claim.asString() as T
+                }
+            }
         } catch (e: Exception) {
             null
         }
@@ -131,7 +140,8 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun isTokenExpired(token: String): Boolean {
         return try {
-            parseToken(token).expiration.before(Date())
+            val principal = verifier.verify(token)
+            principal.expiresAt.before(Date())
         } catch (e: Exception) {
             true
         }
@@ -145,7 +155,8 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getExpirationDateFromToken(token: String): Date? {
         return try {
-            parseToken(token).expiration
+            val principal = verifier.verify(token)
+            principal.expiresAt
         } catch (e: Exception) {
             null
         }
@@ -159,31 +170,11 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getIssuedAtDateFromToken(token: String): Date? {
         return try {
-            parseToken(token).issuedAt
+            val principal = verifier.verify(token)
+            principal.issuedAt
         } catch (e: Exception) {
             null
         }
-    }
-
-    /**
-     * 解析令牌中的声明信息
-     *
-     * @param token JWT令牌
-     * @return 令牌中的声明信息
-     * @throws ExpiredJwtException 令牌已过期
-     * @throws UnsupportedJwtException 不支持的令牌
-     * @throws MalformedJwtException 令牌格式错误
-     * @throws SecurityException 签名验证失败
-     * @throws IllegalArgumentException 令牌为空
-     */
-    private fun parseToken(token: String): Claims {
-        return Jwts.parserBuilder()
-            .setSigningKey(secretKey)
-            .requireAudience(audience)
-            .requireIssuer(issuer)
-            .build()
-            .parseClaimsJws(token)
-            .body
     }
 
     /**
@@ -194,14 +185,19 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun refreshToken(token: String): String? {
         return try {
-            val claims = parseToken(token)
-            val userId = claims.subject
-            val username = claims.get("username", String::class.java)
-            
-            val customClaims = claims.entries
-                .filter { it.key !in listOf("sub", "username", "iat", "exp", "iss", "aud") }
-                .associate { it.key to it.value }
-            
+            val principal = verifier.verify(token)
+            val userId = principal.subject ?: return null
+            val username = principal.getClaim("username").asString() ?: return null
+
+            // 获取自定义声明，排除标准声明
+            val customClaims = mutableMapOf<String, Any>()
+            val payload = principal.claims
+            for (entry in payload) {
+                if (entry.key !in listOf("sub", "username", "iat", "exp", "aud", "iss")) {
+                    customClaims[entry.key] = entry.value
+                }
+            }
+
             generateToken(userId, username, customClaims)
         } catch (e: Exception) {
             println("刷新令牌失败: ${e.message}")
