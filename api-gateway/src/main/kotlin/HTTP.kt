@@ -21,10 +21,14 @@ fun Application.configureHTTP() {
         // 允许的请求头
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
+        allowHeader(HttpHeaders.Accept)
+        allowHeader(HttpHeaders.Origin)
+        allowHeader(HttpHeaders.XForwardedProto)
         allowHeader("X-Requested-With")
 
         // 允许的凭证
         allowCredentials = true
+        allowNonSimpleContentTypes = true
 
         // 允许的来源(开发环境可以设置为 *)
         anyHost()  // 生产环境建议设置具体域名
