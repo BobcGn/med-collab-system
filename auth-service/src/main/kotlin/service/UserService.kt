@@ -16,7 +16,7 @@ class UserService(
      *
      * @param user
      * @return UserDto.RegisterResponse 包含用户信息和消息
-     * @throws
+     * @throws AuthException.PasswordTooWeakException
      */
     suspend fun registerUser(user: UserDto.UserRegister): UserDto.RegisterResponse {
         // 检查密码强度
@@ -767,7 +767,7 @@ class UserService(
      * @return UserDto.UserInfo
      */
     suspend fun validateTokenAndGetUser(token: String): UserDto.UserInfo {
-        val userId = jwtUtil.getUserIdFromToken(token)?:throw Exception("Token中缺少用户ID")
+        val userId = throw Exception("Token验证需要通过Ktor认证中间件，直接调用此方法不被支持")
 
         return userRepository.findUserById(userId)
             ?: throw Exception("用户不存在")
