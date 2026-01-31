@@ -215,3 +215,116 @@ export const authApi = {
   }),
 }
 
+// 患者服务 API 配置（通过网关访问）
+const PATIENT_API_BASE_URL = 'http://localhost:8088/api/patients'
+
+const patientRequest = async (url, options = {}) => {
+  const token = localStorage.getItem('token')
+
+  const config = {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+      ...options.headers,
+    },
+  }
+
+  try {
+    const response = await fetch(`${PATIENT_API_BASE_URL}${url}`, config)
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
+      console.error('患者API请求失败:', response.status, error)
+      throw new Error(error.message || `请求失败 (${response.status})`)
+    }
+
+    return await response.json()
+  } catch (error) {
+    console.error('患者API请求异常:', error)
+    throw error
+  }
+}
+
+export const patientApi = {
+  // 获取患者列表（分页）
+  getPatients: (params = {}) => {
+    const query = new URLSearchParams(params).toString()
+    return patientRequest(`${query ? `?${query}` : ''}`, {
+      method: 'GET',
+    })
+  },
+
+  // 搜索患者
+  searchPatients: (params) => {
+    const query = new URLSearchParams(params).toString()
+    return patientRequest(`/search?${query}`, {
+      method: 'GET',
+    })
+  },
+
+  // 获取患者详情
+  getPatient: (id) => patientRequest(`/${id}`, {
+    method: 'GET',
+  }),
+
+  // 创建患者
+  createPatient: (data) => patientRequest('/', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  // 更新患者信息
+  updatePatient: (id, data) => patientRequest(`/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+
+  // 删除患者
+  deletePatient: (id) => patientRequest(`/${id}`, {
+    method: 'DELETE',
+  }),
+
+  // 批量删除患者
+  batchDeletePatients: (ids) => patientRequest('/batch', {
+    method: 'DELETE',
+    body: JSON.stringify(ids),
+  }),
+
+  // 软删除患者
+  softDeletePatient: (id) => patientRequest(`/${id}/soft`, {
+    method: 'DELETE',
+  }),
+
+  // 恢复患者
+  restorePatient: (id) => patientRequest(`/${id}/restore`, {
+    method: 'PUT',
+  }),
+
+  // 更新患者状态
+  updateStatus: (id, status) => patientRequest(`/${id}/status`, {
+    method: 'PUT',
+    body: JSON.stringify({ status }),
+  }),
+
+  // 批量更新状态
+  batchUpdateStatus: (ids, status) => patientRequest('/batch/status', {
+    method: 'PUT',
+    body: JSON.stringify({ patientIds: ids, status }),
+  }),
+
+  // 分配医生
+  assignDoctor: (patientId, doctorId) => patientRequest(`/${patientId}/doctor`, {
+    method: 'PUT',
+    body: JSON.stringify({ doctorId }),
+  }),
+
+  // 获取患者统计信息
+  getStatistics: (hospitalId) => {
+    const query = hospitalId ? `?hospitalId=${hospitalId}` : ''
+    return patientRequest(`/statistics${query}`, {
+      method: 'GET',
+    })
+  },
+}
+
