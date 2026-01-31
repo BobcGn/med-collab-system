@@ -8,7 +8,6 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
-import utils.JwtUtil
 
 
 
@@ -17,7 +16,6 @@ import utils.JwtUtil
  * 定义网关的所有路由规则
  */
 fun Application.configureRouting() {
-    val jwtUtil = JwtUtil(environment.config)
     routing{
         // 健康检查端点
         get("/health") {
@@ -37,33 +35,33 @@ fun Application.configureRouting() {
         // 服务路由 - 认证服务(公开访问)
         route("/api/auth") {
             get("/{...}") {
-                forwardToService(call, "auth", jwtUtil, requireAuth = false)
+                forwardToService(call, "auth", requireAuth = false)
             }
             post("/{...}") {
-                forwardToService(call, "auth", jwtUtil, requireAuth = false)
+                forwardToService(call, "auth", requireAuth = false)
             }
             put("/{...}") {
-                forwardToService(call, "auth", jwtUtil, requireAuth = false)
+                forwardToService(call, "auth", requireAuth = false)
             }
             delete("/{...}") {
-                forwardToService(call, "auth", jwtUtil, requireAuth = false)
+                forwardToService(call, "auth", requireAuth = false)
             }
         }
 
         // 服务路由 - 患者服务(需要认证)
-        route("/patient") {
+        route("/api/patients") {
             authenticate("jwt") {
                 get("/{...}") {
-                    forwardToService(call, "patient", jwtUtil, requireAuth = true)
+                    forwardToService(call, "patient", requireAuth = true)
                 }
                 post("/{...}") {
-                    forwardToService(call, "patient", jwtUtil, requireAuth = true)
+                    forwardToService(call, "patient", requireAuth = true)
                 }
                 put("/{...}") {
-                    forwardToService(call, "patient", jwtUtil, requireAuth = true)
+                    forwardToService(call, "patient", requireAuth = true)
                 }
                 delete("/{...}") {
-                    forwardToService(call, "patient", jwtUtil, requireAuth = true)
+                    forwardToService(call, "patient", requireAuth = true)
                 }
             }
         }
@@ -72,16 +70,16 @@ fun Application.configureRouting() {
         route("/metric") {
             authenticate("jwt") {
                 get("/{...}") {
-                    forwardToService(call, "metric", jwtUtil, requireAuth = true)
+                    forwardToService(call, "metric", requireAuth = true)
                 }
                 post("/{...}") {
-                    forwardToService(call, "metric", jwtUtil, requireAuth = true)
+                    forwardToService(call, "metric", requireAuth = true)
                 }
                 put("/{...}") {
-                    forwardToService(call, "metric", jwtUtil, requireAuth = true)
+                    forwardToService(call, "metric", requireAuth = true)
                 }
                 delete("/{...}") {
-                    forwardToService(call, "metric", jwtUtil, requireAuth = true)
+                    forwardToService(call, "metric", requireAuth = true)
                 }
             }
         }
@@ -90,16 +88,16 @@ fun Application.configureRouting() {
         route("/report") {
             authenticate("jwt") {
                 get("/{...}") {
-                    forwardToService(call, "report", jwtUtil, requireAuth = true)
+                    forwardToService(call, "report", requireAuth = true)
                 }
                 post("/{...}") {
-                    forwardToService(call, "report", jwtUtil, requireAuth = true)
+                    forwardToService(call, "report", requireAuth = true)
                 }
                 put("/{...}") {
-                    forwardToService(call, "report", jwtUtil, requireAuth = true)
+                    forwardToService(call, "report", requireAuth = true)
                 }
                 delete("/{...}") {
-                    forwardToService(call, "report", jwtUtil, requireAuth = true)
+                    forwardToService(call, "report", requireAuth = true)
                 }
             }
         }
@@ -127,11 +125,11 @@ fun Application.configureRouting() {
 private suspend fun forwardToService(
     call: ApplicationCall,
     serviceName: String,
-    jwtUtil: JwtUtil,
     requireAuth: Boolean
 ) {
     val service = ServiceConfig.services[serviceName]
         ?: run {
+            call.application.environment.log.error("服务未注册: $serviceName")
             call.respond(
                 HttpStatusCode.InternalServerError,
                 StandardResponse(
@@ -146,7 +144,13 @@ private suspend fun forwardToService(
 
     // 构建目标URL
     val originalPath = call.request.path()
-    val pathWithoutPrefix = originalPath.substring(service.pathPrefix.length)
+    var pathWithoutPrefix = originalPath.substring(service.pathPrefix.length)
+
+    // 特殊处理：患者服务需要添加 /patients 前缀
+    if (serviceName == "patient") {
+        pathWithoutPrefix = "/patients$pathWithoutPrefix"
+    }
+
     // 修复路径拼接问题，避免双斜杠
     val normalizedPath = if (pathWithoutPrefix.startsWith("/") || service.baseUrl.endsWith("/")) {
         "${service.baseUrl}$pathWithoutPrefix"
@@ -155,6 +159,7 @@ private suspend fun forwardToService(
     }
     val targetUrl = "$normalizedPath${if (!call.request.queryString().isNullOrEmpty()) "?${call.request.queryString()}" else ""}"
 
+    call.application.environment.log.info("转发请求: $serviceName, 原始路径: $originalPath, 目标URL: $targetUrl")
 
     // 转发请求
     call.forwardRequest(targetUrl, call.request.headers)

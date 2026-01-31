@@ -16,7 +16,7 @@ import io.ktor.server.routing.*
 import utils.JwtUtil
 
 fun Application.configureRouting() {
-    // 创建JwtUtil实例
+    // 创建 JwtUtil 实例
     val jwtUtil = JwtUtil(environment.config)
 
     // 创建Repository实例
