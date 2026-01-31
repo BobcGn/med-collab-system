@@ -1,54 +1,50 @@
 package com.example
 
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
-import io.ktor.server.response.*
-import utils.JwtUtil
-
 
 /**
- * 安全配置
- * 配置JWT认证
+ * 配置 JWT 认证
+ *
+ * 此函数配置 JWT 验证器，用于验证传入的 JWT 令牌
  */
 fun Application.configureSecurity() {
-    val jwtUtil = JwtUtil(environment.config)
     val jwtConfig = environment.config.config("jwt")
+    val secret = jwtConfig.property("secret").getString()
+    val issuer = jwtConfig.property("issuer").getString()
+    val audience = jwtConfig.property("audience").getString()
+    var realm = jwtConfig.property("realm").getString()
 
-    authentication {
+    install(Authentication) {
         jwt("jwt") {
-            realm = jwtConfig.property("realm").getString()
+            this@configureSecurity.environment.log.info("配置JWT认证")
 
-            // JWT 验证器 - 使用 JwtUtil 类提供的验证逻辑
+            realm = this@configureSecurity.environment.config.config("jwt").property("realm").getString()
+
+            // 配置验证器
+            verifier {
+                val algorithm = com.auth0.jwt.algorithms.Algorithm.HMAC256(secret)
+                com.auth0.jwt.JWT.require(algorithm)
+                    .withIssuer(issuer)
+                    .withAudience(audience)
+                    .build()
+            }
+
+            // 验证函数：检查令牌的 audience 是否匹配
             validate { credential ->
-                try {
-                    // 从凭证中提取用户信息
-                    val userId = credential.payload.getClaim("userId").asString()
-                    val username = credential.payload.getClaim("username").asString()
-
-                    // 在validate函数外部无法直接访问call，所以我们直接验证JWT凭证的有效性
-                    if (userId != null && userId.isNotEmpty()) {
-                        JWTPrincipal(credential.payload)
-                    } else {
-                        null
-                    }
-                } catch (e: Exception) {
+                val aud = credential.payload.audience
+                if (aud.contains(audience)) {
+                    JWTPrincipal(credential.payload)
+                } else {
                     null
                 }
             }
 
-            // 认证失败的处理
-            challenge { _, _ ->
-                call.respond(
-                    HttpStatusCode.Unauthorized,
-                    StandardResponse(
-                        success = false,
-                        code = 401,
-                        message = "未授权或令牌已过期",
-                        data = null
-                    )
-                )
+            // 令牌过期时拒绝
+            skipWhen { call ->
+                // 对于公开端点，可以通过路由配置跳过验证
+                false
             }
         }
     }
