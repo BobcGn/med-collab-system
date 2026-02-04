@@ -258,7 +258,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { authApi } from '../utils/api'
+import { authApi } from '../utils/api.js'
 
 // 标签页状态
 const activeTab = ref('hospitals')

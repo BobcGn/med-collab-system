@@ -259,7 +259,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { patientApi } from '../utils/api'
+import { patientApi } from '../utils/api.js'
 
 // 患者管理相关状态
 const patients = ref([])

@@ -159,7 +159,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { authApi } from '../utils/api'
+import { authApi } from '../utils/api.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()

@@ -117,8 +117,8 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { authApi } from '../utils/api'
-import { authStore } from '../utils/auth'
+import { authApi } from '../utils/api.js'
+import { authStore } from '../utils/auth.js'
 
 const user = ref(null)
 const loading = ref(false)

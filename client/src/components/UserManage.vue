@@ -260,7 +260,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { authApi } from '../utils/api'
+import { authApi } from '../utils/api.js'
 
 // 用户管理相关状态
 const users = ref([])

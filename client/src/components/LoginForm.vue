@@ -73,8 +73,8 @@
 
 <script setup>
 import { ref } from 'vue'
-import { authApi } from '../utils/api'
-import { authStore } from '../utils/auth'
+import { authApi } from '../utils/api.js'
+import { authStore } from '../utils/auth.js'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()

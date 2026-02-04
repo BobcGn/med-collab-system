@@ -66,7 +66,7 @@
 
 <script setup>
 import { ref, onMounted, defineEmits } from 'vue'
-import { authApi } from '../utils/api'
+import { authApi } from '../utils/api.js'
 
 const emit = defineEmits(['select-user'])
 

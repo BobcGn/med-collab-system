@@ -218,7 +218,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { authStore } from '../utils/auth'
+import { authStore } from '../utils/auth.js'
 
 const router = useRouter()
 const currentUser = authStore.getCurrentUser()

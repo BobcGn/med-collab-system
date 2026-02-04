@@ -3,6 +3,11 @@ plugins {
     id("io.ktor.plugin") version "3.3.2"
     kotlin("plugin.serialization") version "2.2.21"
 }
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+    }
+}
 
 application {
     mainClass = "com.example.medcollab.auth.ApplicationKt"
