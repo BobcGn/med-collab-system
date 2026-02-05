@@ -8,6 +8,12 @@ const routes = [
     component: () => import('../components/LoginForm.vue'),
     meta: { requiresAuth: false },
   },
+  // 主页路由
+  {
+    path: '/home',
+    name: 'Home',
+    redirect: '/dashboard'
+  },
   {
     path: '/register',
     name: 'Register',

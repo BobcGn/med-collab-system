@@ -12,7 +12,7 @@ object Users : IdTable<String>("med_auth.user") {
     val userSeq = varchar("user_seq", length = 20)
     val fullName = varchar("full_name", length = 100)
     val passwordHash = varchar("password_hash", length = 255)
-    val role = text("role").default("doctor")  // 修复: 移除额外的引号
+    val role = varchar("role", length = 50).default("doctor")
     val isDeleted = bool("is_deleted").default(false)
     val isFrozen = bool("is_frozen").default(false)  // 添加冻结状态
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)

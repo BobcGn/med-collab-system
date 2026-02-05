@@ -22,7 +22,8 @@ create table med_auth.department (
     is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT '是否启用',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id, hospital_id),
+    PRIMARY KEY (id),
+    UNIQUE KEY unique_dept_per_hospital (id, hospital_id) COMMENT '同一医院下科室ID唯一',
     INDEX idx_dept_hospital (hospital_id),
     INDEX idx_dept_active (is_active)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -45,7 +46,7 @@ create table med_auth.user (
 
     full_name VARCHAR(100) NOT NULL,
     password_hash VARCHAR(255) NOT NULL COMMENT 'SHA-256 加密',
-    role ENUM('doctor', 'admin', 'nurse', 'receptionist') NOT NULL DEFAULT 'doctor',
+    role VARCHAR(50) NOT NULL DEFAULT 'doctor' COMMENT '角色: doctor, admin',
     is_deleted TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否删除（软删除）',
     is_frozen TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否冻结',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -55,5 +56,6 @@ create table med_auth.user (
     INDEX idx_hospital_dept (hospital_id, dept_code),
     INDEX idx_username (username),
     INDEX idx_deleted (is_deleted),
-    INDEX idx_frozen (is_frozen)
+    INDEX idx_frozen (is_frozen),
+    INDEX idx_role (role)
 )ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

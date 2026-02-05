@@ -85,7 +85,7 @@
         <div class="activity-list">
           <div v-for="activity in recentActivities" :key="activity.id" class="activity-item">
             <div class="activity-icon" :class="activity.type">
-              <component :is="getActivityIcon(activity.type)" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" v-html="getActivityIcon(activity.type)"></svg>
             </div>
             <div class="activity-content">
               <div class="activity-title">{{ activity.title }}</div>
@@ -98,7 +98,7 @@
 
     <!-- 用户端工作台 -->
     <div v-else class="user-dashboard">
-      <h2 class="dashboard-title">{{ getRoleTitle() }}</h2>
+      <h2 class="dashboard-title">{{ getRoleTitle }}</h2>
       
       <div class="stats-grid">
         <div class="stat-card">
@@ -221,7 +221,7 @@ import { useRouter } from 'vue-router'
 import { authStore } from '../utils/auth.js'
 
 const router = useRouter()
-const currentUser = authStore.getCurrentUser()
+const currentUser = computed(() => authStore.getCurrentUser())
 
 const isAdmin = computed(() => authStore.hasRole('admin'))
 
@@ -252,22 +252,21 @@ const recentActivities = ref([
   { id: 5, type: 'user', title: '用户角色变更：李医生', time: '5小时前' }
 ])
 
-const getRoleTitle = () => {
-  const role = currentUser?.role
+const getRoleTitle = computed(() => {
+  const role = currentUser.value?.role
   const roleMap = {
     doctor: '医生工作台',
-    nurse: '护士工作台',
-    receptionist: '前台工作台'
+    admin: '管理员工作台'
   }
   return roleMap[role] || '工作台'
-}
+})
 
 const getActivityIcon = (type) => {
   const icons = {
-    user: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
-    hospital: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"></path><path d="M5 21V7l8-4 8 4v14"></path></svg>`,
-    report: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>`,
-    alert: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
+    user: `<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>`,
+    hospital: `<path d="M3 21h18"></path><path d="M5 21V7l8-4 8 4v14"></path>`,
+    report: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>`,
+    alert: `<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>`
   }
   return icons[type] || icons.user
 }
