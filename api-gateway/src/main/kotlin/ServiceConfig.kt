@@ -19,7 +19,7 @@ object ServiceConfig {
             "patient" to ServiceConfigItem(
                 name = "患者服务",
                 baseUrl = config?.config("services.patient")?.property("baseUrl")?.getString() ?: "http://localhost:8082",
-                pathPrefix = config?.config("services.patient")?.property("pathPrefix")?.getString() ?: "/api/patients"
+                pathPrefix = config?.config("services.patient")?.property("pathPrefix")?.getString() ?: "/patients"
             ),
             "metric" to ServiceConfigItem(
                 name = "指标服务",

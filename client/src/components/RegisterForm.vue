@@ -139,15 +139,15 @@
           <h3>注册成功</h3>
         </div>
         <div class="modal-body">
-          <p class="modal-title">您的账号为：</p>
+          <p class="modal-title">您的序列号为：</p>
           <div class="username-box" @click="copyUsername" title="点击复制">
             <code class="username-text">{{ registeredUsername }}</code>
-            <button class="copy-button" @click.stop="copyUsername" title="复制账号">
+            <button class="copy-button" @click.stop="copyUsername" title="复制序列号">
               <span v-if="!copied">复制</span>
               <span v-else>已复制</span>
             </button>
           </div>
-          <p class="modal-tip">点击账号或复制按钮即可复制，然后使用此账号登录</p>
+          <p class="modal-tip">点击序列号或复制按钮即可复制，然后使用此序列号登录</p>
         </div>
         <div class="modal-footer">
           <button class="modal-button" @click="goToLogin">去登录</button>
@@ -264,8 +264,26 @@ const handleRegister = async () => {
       password: formData.value.password,
     })
 
-    // 注册成功，保存用户名并显示弹窗
-    registeredUsername.value = response.user.username
+    // 注册成功，提取序列号并显示弹窗
+    let serialNumber = ''
+    const username = response.user.username
+    
+    // 提取序列号
+    if (username.startsWith('admin-')) {
+      // 管理员用户名格式: admin-序列号
+      serialNumber = username.substring('admin-'.length)
+    } else {
+      // 用户用户名格式: 医院id-部门id-序列号
+      // 分割字符串，取最后一部分作为序列号
+      const parts = username.split('-')
+      if (parts.length >= 3) {
+        serialNumber = parts[parts.length - 1]
+      } else {
+        serialNumber = username
+      }
+    }
+    
+    registeredUsername.value = serialNumber
     registerSuccess.value = true
   } catch (error) {
     errorMessage.value = error.message || '注册失败，请稍后重试'

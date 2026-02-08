@@ -28,6 +28,18 @@ fun Application.configureRouting() {
             )
         }
 
+        // 测试JWT端点（用于调试）
+        get("/test-jwt") {
+            val authHeader = call.request.headers["Authorization"]
+            call.application.environment.log.info("测试JWT: Authorization=$authHeader")
+            call.respond(
+                mapOf(
+                    "hasAuthorization" to (authHeader != null),
+                    "authorizationHeader" to (authHeader?.take(50) ?: "null")
+                )
+            )
+        }
+
         // 指标端点 (用于 Prometheus 监控)
         get("/metrics") {
             call.respondText("Prometheus metrics endpoint", ContentType.Text.Plain)
@@ -49,18 +61,22 @@ fun Application.configureRouting() {
         }
 
         // 服务路由 - 患者服务(需要认证)
-        route("/api/patients") {
+        route("/patients") {
             authenticate("jwt") {
                 get("/{...}") {
+                    call.application.environment.log.info("患者服务GET请求: ${call.request.path()}")
                     forwardToService(call, "patient", requireAuth = true)
                 }
                 post("/{...}") {
+                    call.application.environment.log.info("患者服务POST请求: ${call.request.path()}")
                     forwardToService(call, "patient", requireAuth = true)
                 }
                 put("/{...}") {
+                    call.application.environment.log.info("患者服务PUT请求: ${call.request.path()}")
                     forwardToService(call, "patient", requireAuth = true)
                 }
                 delete("/{...}") {
+                    call.application.environment.log.info("患者服务DELETE请求: ${call.request.path()}")
                     forwardToService(call, "patient", requireAuth = true)
                 }
             }
@@ -144,18 +160,30 @@ private suspend fun forwardToService(
 
     // 构建目标URL
     val originalPath = call.request.path()
-    var pathWithoutPrefix = originalPath.substring(service.pathPrefix.length)
-
-    // 特殊处理：患者服务需要添加 /patients 前缀
-    if (serviceName == "patient") {
-        pathWithoutPrefix = "/patients$pathWithoutPrefix"
-    }
+    val pathWithoutPrefix = originalPath.substring(service.pathPrefix.length)
 
     // 修复路径拼接问题，避免双斜杠
-    val normalizedPath = if (pathWithoutPrefix.startsWith("/") || service.baseUrl.endsWith("/")) {
+    // 特别处理：当pathWithoutPrefix为空时，确保目标路径正确
+    val targetPath = if (pathWithoutPrefix.isEmpty()) {
+        // 当路径前缀与原始路径完全匹配时，保持服务的基本路径结构
+        service.baseUrl
+    } else if (pathWithoutPrefix.startsWith("/") || service.baseUrl.endsWith("/")) {
         "${service.baseUrl}$pathWithoutPrefix"
     } else {
         "${service.baseUrl}/$pathWithoutPrefix"
+    }
+
+    // 对于患者服务，确保请求转发到正确的路径
+    val normalizedPath = if (serviceName == "patient") {
+        if (targetPath == service.baseUrl) {
+            "${service.baseUrl}/patients"
+        } else if (!targetPath.contains("/patients")) {
+            "${service.baseUrl}/patients${pathWithoutPrefix}"
+        } else {
+            targetPath
+        }
+    } else {
+        targetPath
     }
     val targetUrl = "$normalizedPath${if (!call.request.queryString().isNullOrEmpty()) "?${call.request.queryString()}" else ""}"
 

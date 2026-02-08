@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.database.entity.PatientEntity
 import com.example.database.repository.PatientRepository
 import com.example.service.AuthClient
 import com.example.service.PatientService
@@ -12,6 +13,7 @@ import io.ktor.server.auth.jwt.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import org.jetbrains.exposed.sql.transactions.transaction
 
 fun Application.configureRouting() {
     // 创建Repository和Service实例
@@ -23,7 +25,26 @@ fun Application.configureRouting() {
     routing {
         // 健康检查
         get("/health") {
-            call.respond(HttpStatusCode.OK, mapOf("status" to "ok", "service" to "patient-service"))
+            try {
+                // 测试数据库连接
+                val result = transaction {
+                    PatientEntity.all().count()
+                }
+                call.respond(HttpStatusCode.OK, mapOf(
+                    "status" to "ok",
+                    "service" to "patient-service",
+                    "database" to "connected",
+                    "patientCount" to result
+                ))
+            } catch (e: Exception) {
+                application.log.error("健康检查失败", e)
+                call.respond(HttpStatusCode.InternalServerError, mapOf(
+                    "status" to "error",
+                    "service" to "patient-service",
+                    "database" to "disconnected",
+                    "error" to e.message
+                ))
+            }
         }
 
         // 需要认证的路由
@@ -32,15 +53,27 @@ fun Application.configureRouting() {
 
             // 创建患者
             post("/patients") {
-                val patientCreate = call.receive<PatientDto.CreatePatient>()
-                val result = patientService.createPatient(patientCreate)
-                call.respond(HttpStatusCode.Created, result)
+                try {
+                    application.log.info("开始接收创建患者请求")
+                    val patientCreate = call.receive<PatientDto.CreatePatient>()
+                    application.log.info("接收到的患者数据: $patientCreate")
+                    // 从 JWT token 中获取认证令牌
+                    val principal = call.principal<JWTPrincipal>()
+                    val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                    val result = patientService.createPatient(patientCreate, token)
+                    application.log.info("患者创建成功: ${result.id}")
+                    call.respond(HttpStatusCode.Created, result)
+                } catch (e: Exception) {
+                    application.log.error("创建患者时发生异常", e)
+                    throw e
+                }
             }
 
             // 获取患者详情
             get("/patients/{id}") {
                 val patientId = call.parameters["id"] ?: throw PatientException.PatientNotFoundException()
-                val patient = patientService.getPatientInfo(patientId)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val patient = patientService.getPatientInfo(patientId, token)
                 call.respond(HttpStatusCode.OK, patient)
             }
 
@@ -48,7 +81,8 @@ fun Application.configureRouting() {
             get("/patients/hospital/{hospitalId}/{patientId}") {
                 val hospitalId = call.parameters["hospitalId"] ?: throw PatientException.HospitalIdInvalidException()
                 val patientId = call.parameters["patientId"] ?: throw PatientException.PatientNotFoundException()
-                val patient = patientService.getPatientByHospitalAndPatientId(hospitalId, patientId)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val patient = patientService.getPatientByHospitalAndPatientId(hospitalId, patientId, token)
                 call.respond(HttpStatusCode.OK, patient)
             }
 
@@ -57,8 +91,9 @@ fun Application.configureRouting() {
                 val patientId = call.parameters["id"] ?: throw PatientException.PatientNotFoundException()
                 val principal = call.principal<JWTPrincipal>()
                 val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少用户ID")
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
                 val patientUpdate = call.receive<PatientDto.UpdatePatient>()
-                val success = patientService.updatePatient(patientId, patientUpdate, operatorId)
+                val success = patientService.updatePatient(patientId, patientUpdate, operatorId, token)
                 call.respond(HttpStatusCode.OK, mapOf("success" to success))
             }
 
@@ -78,6 +113,7 @@ fun Application.configureRouting() {
                     val statusStr = call.request.queryParameters["status"]
                     val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 0
                     val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 20
+                    val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
 
                     application.log.info("查询患者列表参数: hospitalId=$hospitalId, department=$department, attendingDoctorId=$attendingDoctorId, status=$statusStr, page=$page, size=$size")
 
@@ -89,7 +125,8 @@ fun Application.configureRouting() {
                         attendingDoctorId = attendingDoctorId,
                         status = status,
                         page = page,
-                        size = size
+                        size = size,
+                        token = token
                     )
 
                     application.log.info("查询患者列表结果: ${patients.size} 条记录")
@@ -107,7 +144,8 @@ fun Application.configureRouting() {
                 val hospitalId = call.parameters["hospitalId"] ?: throw PatientException.HospitalIdInvalidException()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 0
                 val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 20
-                val patients = patientService.getHospitalPatients(hospitalId, page, size)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val patients = patientService.getHospitalPatients(hospitalId, page, size, token)
                 call.respond(HttpStatusCode.OK, patients)
             }
 
@@ -116,7 +154,8 @@ fun Application.configureRouting() {
                 val department = call.parameters["department"] ?: throw PatientException.DepartmentInvalidException()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 0
                 val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 20
-                val patients = patientService.getDepartmentPatients(department, page, size)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val patients = patientService.getDepartmentPatients(department, page, size, token)
                 call.respond(HttpStatusCode.OK, patients)
             }
 
@@ -125,7 +164,8 @@ fun Application.configureRouting() {
                 val doctorId = call.parameters["doctorId"] ?: throw PatientException.DoctorIdInvalidException()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 0
                 val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 20
-                val patients = patientService.getDoctorPatients(doctorId, page, size)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val patients = patientService.getDoctorPatients(doctorId, page, size, token)
                 call.respond(HttpStatusCode.OK, patients)
             }
 
@@ -134,7 +174,8 @@ fun Application.configureRouting() {
                 val keyword = call.request.queryParameters["keyword"] ?: throw PatientException.PatientDataInvalidException()
                 val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 0
                 val size = call.request.queryParameters["size"]?.toIntOrNull() ?: 20
-                val patients = patientService.searchPatients(keyword, page, size)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val patients = patientService.searchPatients(keyword, page, size, token)
                 call.respond(HttpStatusCode.OK, patients)
             }
 
@@ -142,7 +183,8 @@ fun Application.configureRouting() {
             get("/patients/recent") {
                 val days = call.request.queryParameters["days"]?.toIntOrNull() ?: 7
                 val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 20
-                val patients = patientService.getRecentPatients(days, limit)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val patients = patientService.getRecentPatients(days, limit, token)
                 call.respond(HttpStatusCode.OK, patients)
             }
 
@@ -153,10 +195,11 @@ fun Application.configureRouting() {
                 val patientId = call.parameters["id"] ?: throw PatientException.PatientNotFoundException()
                 val principal = call.principal<JWTPrincipal>()
                 val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
                 val request = call.receive<Map<String, String>>()
                 val statusStr = request["status"] ?: throw PatientException.PatientDataInvalidException()
                 val status = enumValueOf<enums.Status>(statusStr)
-                val success = patientService.updatePatientStatus(patientId, status, operatorId)
+                val success = patientService.updatePatientStatus(patientId, status, operatorId, token)
                 call.respond(HttpStatusCode.OK, mapOf("success" to success))
             }
 
@@ -204,12 +247,14 @@ fun Application.configureRouting() {
                 val patientId = call.parameters["id"] ?: throw PatientException.PatientNotFoundException()
                 val principal = call.principal<JWTPrincipal>()
                 val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
                 val transferRequest = call.receive<PatientTransferRequest>()
                 val success = patientService.transferPatient(
                     patientId = patientId,
                     newDepartment = transferRequest.newDepartment,
                     newAttendingDoctorId = transferRequest.newAttendingDoctorId,
-                    operatorId = operatorId
+                    operatorId = operatorId,
+                    token = token
                 )
                 call.respond(HttpStatusCode.OK, mapOf("success" to success))
             }
@@ -228,7 +273,8 @@ fun Application.configureRouting() {
             // 获取患者统计信息
             get("/patients/statistics") {
                 val hospitalId = call.request.queryParameters["hospitalId"]
-                val statistics = patientService.getPatientStatistics(hospitalId)
+                val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+                val statistics = patientService.getPatientStatistics(hospitalId, token)
                 call.respond(HttpStatusCode.OK, statistics)
             }
         }

@@ -5,24 +5,109 @@ const API_BASE_URL = 'http://localhost:8088/api/auth'
 const request = async (url, options = {}) => {
   const token = localStorage.getItem('token')
 
+  const baseHeaders = {
+    'Content-Type': 'application/json',
+    ...(token && { Authorization: `Bearer ${token}` }),
+  }
+
   const config = {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
-      ...(token && { Authorization: `Bearer ${token}` }),
+      ...baseHeaders,
       ...options.headers,
     },
   }
 
-  try {
+  // 内部重试标记，防止无限循环
+  let hasRetry = false
+
+  // 执行请求并在遇到 401 时尝试刷新令牌
+  const doRequest = async () => {
     const response = await fetch(`${API_BASE_URL}${url}`, config)
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: '请求失败' }))
-      throw new Error(error.message || '请求失败')
+
+      // 401 时尝试刷新令牌一次，然后重试
+      if (response.status === 401 && !hasRetry && token) {
+        try {
+          // 先尝试用当前 token 刷新 Token
+          const refreshResp = await fetch(`${API_BASE_URL}/refresh`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          })
+
+          if (refreshResp.ok) {
+            const refreshData = await refreshResp.json()
+            const newToken = refreshData?.token
+            if (newToken) {
+              localStorage.setItem('token', newToken)
+              // 替换 header 中的 token，然后重试
+              config.headers = {
+                ...config.headers,
+                Authorization: `Bearer ${newToken}`,
+              }
+              hasRetry = true
+              return await doRequest()
+            }
+          } else {
+            // 刷新 Token 失败，说明当前 Token 已完全无效，跳转到登录页
+            console.error('[API] 刷新 Token 失败，跳转到登录页')
+            // 清除认证信息
+            localStorage.removeItem('token')
+            localStorage.removeItem('currentUser')
+            // 跳转到登录页
+            window.location.href = '/login'
+            throw new Error('登录已过期，请重新登录')
+          }
+        } catch (e) {
+          // 刷新 Token 时发生错误，说明当前 Token 已完全无效，跳转到登录页
+          console.error('[API] 刷新 Token 时发生错误，跳转到登录页:', e)
+          // 清除认证信息
+          localStorage.removeItem('token')
+          localStorage.removeItem('currentUser')
+          // 跳转到登录页
+          window.location.href = '/login'
+          throw new Error('登录已过期，请重新登录')
+        }
+      }
+
+      throw new Error(error.message || `请求失败 (${response.status})`)
     }
 
-    return await response.json()
+    // 处理空响应体的情况
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      // 如果响应体不是JSON，返回空数组
+      console.log('[Patient API] 响应体不是JSON，返回空数组')
+      return []
+    }
+
+    // 尝试解析响应体
+    try {
+      // 先检查响应体是否为空
+      const text = await response.text()
+      if (!text) {
+        // 如果响应体为空，返回空数组
+        console.log('[Patient API] 响应体为空，返回空数组')
+        return []
+      }
+      // 如果响应体不为空，尝试解析它
+      const data = JSON.parse(text)
+      console.log('[Patient API] 响应体解析成功:', data)
+      return data
+    } catch (e) {
+      // 如果解析失败，返回空数组
+      console.log('[Patient API] 响应体解析失败，返回空数组:', e)
+      return []
+    }
+  }
+
+  try {
+    return await doRequest()
   } catch (error) {
     throw error
   }
@@ -216,30 +301,165 @@ export const authApi = {
 }
 
 // 患者服务 API 配置（通过网关访问）
-const PATIENT_API_BASE_URL = 'http://localhost:8088/api/patients'
+const PATIENT_API_BASE_URL = 'http://localhost:8088'
 
 const patientRequest = async (url, options = {}) => {
   const token = localStorage.getItem('token')
+
+  // 修正URL构建逻辑 - 处理不同URL格式
+  let fullUrl
+  if (url.startsWith('/')) {
+    // 以/开头的路径
+    fullUrl = `${PATIENT_API_BASE_URL}${url}`
+  } else if (url.startsWith('?')) {
+    // 以?开头的查询参数
+    fullUrl = `${PATIENT_API_BASE_URL}${url}`
+  } else if (url) {
+    // 其他非空路径
+    fullUrl = `${PATIENT_API_BASE_URL}/${url}`
+  } else {
+    // 空路径
+    fullUrl = PATIENT_API_BASE_URL
+  }
+
+  console.log('[Patient API] 请求URL:', fullUrl)
+  console.log('[Patient API] Token存在:', !!token)
+  console.log('[Patient API] Token前缀:', token?.substring(0, 20))
 
   const config = {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
       ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     },
   }
 
+  // 记录请求体(仅用于调试)
+  if (options.body) {
+    try {
+      const requestBody = JSON.parse(options.body)
+      console.log('[Patient API] 请求体数据:', JSON.stringify(requestBody, null, 2))
+    } catch (e) {
+      console.log('[Patient API] 请求体原始数据:', options.body)
+    }
+  }
+
+  console.log('[Patient API] 请求头Authorization:', config.headers.Authorization ? config.headers.Authorization.substring(0, 30) : '未设置')
+
+  // 请求患者数据，若返回 401/502/503，则尝试刷新 Token 或重试一次后再报错
+  let retryPatient = false
+  let retry502 = false
   try {
-    const response = await fetch(`${PATIENT_API_BASE_URL}${url}`, config)
+    let response = await fetch(fullUrl, config)
+
+    console.log('[Patient API] 响应状态:', response.status)
+    console.log('[Patient API] 响应OK:', response.ok)
+
+    // 如果服务端返回 502/503，尝试一次简单重试以应对短暂网关问题
+    if (!response.ok && (response.status === 502 || response.status === 503) && !retry502) {
+      retry502 = true
+      console.warn('[Patient API] 收到后端网关错误 (502/503)，尝试重试一次')
+      response = await fetch(fullUrl, config)
+      console.log('[Patient API] 重试后响应状态:', response.status)
+      console.log('[Patient API] 重试后响应OK:', response.ok)
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
-      console.error('患者API请求失败:', response.status, error)
-      throw new Error(error.message || `请求失败 (${response.status})`)
+      console.error('[Patient API] 请求失败，详细信息:', {
+        status: response.status,
+        url: fullUrl,
+        error: error,
+        requestBody: options.body
+      })
+      // 401 时尝试自动刷新 Token
+      if (response.status === 401 && token && !retryPatient) {
+        try {
+          const refreshResp = await fetch(`${API_BASE_URL}/refresh`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          })
+          if (refreshResp.ok) {
+            const refreshData = await refreshResp.json()
+            const newToken = refreshData?.token
+            if (newToken) {
+              localStorage.setItem('token', newToken)
+              // 更新请求头中的 token，然后重试
+              config.headers = {
+                ...config.headers,
+                Authorization: `Bearer ${newToken}`,
+              }
+              retryPatient = true
+              response = await fetch(fullUrl, config)
+              if (!response.ok) {
+                const err2 = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
+                console.error('[Patient API] 重试请求失败，详细信息:', {
+                  status: response.status,
+                  url: fullUrl,
+                  error: err2
+                })
+                throw new Error(err2.message || `请求失败 (${response.status})`)
+              }
+            }
+          } else {
+            // 刷新 Token 失败，说明当前 Token 已完全无效，跳转到登录页
+            console.error('[Patient API] 刷新 Token 失败，跳转到登录页')
+            // 清除认证信息
+            localStorage.removeItem('token')
+            localStorage.removeItem('currentUser')
+            // 跳转到登录页
+            window.location.href = '/login'
+            throw new Error('登录已过期，请重新登录')
+          }
+        } catch (e) {
+          // 刞新 Token 时发生错误，说明当前 Token 已完全无效，跳转到登录页
+          console.error('[Patient API] 刷新 Token 时发生错误，跳转到登录页:', e)
+          // 清除认证信息
+          localStorage.removeItem('token')
+          localStorage.removeItem('currentUser')
+          // 跳转到登录页
+          window.location.href = '/login'
+          throw new Error('登录已过期，请重新登录')
+        }
+      }
+      // 构建详细的错误信息
+      const errorMessage = error.message || error.error || error.detail || `请求失败 (${response.status})`
+      const detailedError = `${errorMessage} (状态码: ${response.status})`
+      console.error('[Patient API] 详细错误信息:', detailedError)
+      throw new Error(detailedError)
     }
 
-    return await response.json()
+    // 处理空响应体的情况
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      // 如果响应体不是JSON，返回空数组
+      console.log('[Patient API] 响应体不是JSON，返回空数组')
+      return []
+    }
+
+    // 尝试解析响应体
+    try {
+      // 先检查响应体是否为空
+      const text = await response.text()
+      if (!text) {
+        // 如果响应体为空，返回空数组
+        console.log('[Patient API] 响应体为空，返回空数组')
+        return []
+      }
+      // 如果响应体不为空，尝试解析它
+      const data = JSON.parse(text)
+      console.log('[Patient API] 响应体解析成功:', data)
+      return data
+    } catch (e) {
+      // 如果解析失败，返回空数组
+      console.log('[Patient API] 响应体解析失败，返回空数组:', e)
+      return []
+    }
   } catch (error) {
     console.error('患者API请求异常:', error)
     throw error
@@ -250,7 +470,7 @@ export const patientApi = {
   // 获取患者列表（分页）
   getPatients: (params = {}) => {
     const query = new URLSearchParams(params).toString()
-    return patientRequest(`${query ? `?${query}` : ''}`, {
+    return patientRequest(`/patients${query ? `?${query}` : ''}`, {
       method: 'GET',
     })
   },
@@ -258,63 +478,68 @@ export const patientApi = {
   // 搜索患者
   searchPatients: (params) => {
     const query = new URLSearchParams(params).toString()
-    return patientRequest(`/search?${query}`, {
+    return patientRequest(`/patients/search?${query}`, {
       method: 'GET',
     })
   },
 
   // 获取患者详情
-  getPatient: (id) => patientRequest(`/${id}`, {
+  getPatient: (id) => patientRequest(`/patients/${id}`, {
+    method: 'GET',
+  }),
+
+  // 获取患者详情（别名）
+  getPatientById: (id) => patientRequest(`/patients/${id}`, {
     method: 'GET',
   }),
 
   // 创建患者
-  createPatient: (data) => patientRequest('/', {
+  createPatient: (data) => patientRequest('/patients', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
 
   // 更新患者信息
-  updatePatient: (id, data) => patientRequest(`/${id}`, {
+  updatePatient: (id, data) => patientRequest(`/patients/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   }),
 
   // 删除患者
-  deletePatient: (id) => patientRequest(`/${id}`, {
+  deletePatient: (id) => patientRequest(`/patients/${id}`, {
     method: 'DELETE',
   }),
 
   // 批量删除患者
-  batchDeletePatients: (ids) => patientRequest('/batch', {
+  batchDeletePatients: (ids) => patientRequest('/patients/batch', {
     method: 'DELETE',
     body: JSON.stringify(ids),
   }),
 
   // 软删除患者
-  softDeletePatient: (id) => patientRequest(`/${id}/soft`, {
+  softDeletePatient: (id) => patientRequest(`/patients/${id}/soft`, {
     method: 'DELETE',
   }),
 
   // 恢复患者
-  restorePatient: (id) => patientRequest(`/${id}/restore`, {
+  restorePatient: (id) => patientRequest(`/patients/${id}/restore`, {
     method: 'PUT',
   }),
 
   // 更新患者状态
-  updateStatus: (id, status) => patientRequest(`/${id}/status`, {
+  updateStatus: (id, status) => patientRequest(`/patients/${id}/status`, {
     method: 'PUT',
     body: JSON.stringify({ status }),
   }),
 
   // 批量更新状态
-  batchUpdateStatus: (ids, status) => patientRequest('/batch/status', {
+  batchUpdateStatus: (ids, status) => patientRequest('/patients/batch/status', {
     method: 'PUT',
     body: JSON.stringify({ patientIds: ids, status }),
   }),
 
   // 分配医生
-  assignDoctor: (patientId, doctorId) => patientRequest(`/${patientId}/doctor`, {
+  assignDoctor: (patientId, doctorId) => patientRequest(`/patients/${patientId}/doctor`, {
     method: 'PUT',
     body: JSON.stringify({ doctorId }),
   }),
@@ -322,9 +547,8 @@ export const patientApi = {
   // 获取患者统计信息
   getStatistics: (hospitalId) => {
     const query = hospitalId ? `?hospitalId=${hospitalId}` : ''
-    return patientRequest(`/statistics${query}`, {
+    return patientRequest(`/patients/statistics${query}`, {
       method: 'GET',
     })
   },
 }
-

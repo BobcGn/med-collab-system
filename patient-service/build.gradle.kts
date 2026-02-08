@@ -5,7 +5,7 @@ plugins {
 }
 
 application {
-    mainClass = "com.example.medcollab.patient.ApplicationKt"
+    mainClass = "com.example.ApplicationKt"
 }
 tasks.register("prepareKotlinBuildScriptModel")
 dependencies {

@@ -24,7 +24,7 @@ class PatientRepository {
                     it[Patients.patientId] = patient.patientId
                     it[name] = patient.name
                     it[gender] = patient.gender.name
-                    it[birthDate] = patient.birthDate.let { parseLocalDate(it) }
+                    it[birthDate] = patient.birthDate?.let { parseLocalDate(it) }
                     it[phone] = patient.phone
                     it[idCard] = patient.idCard
                     it[department] = patient.department
@@ -43,7 +43,7 @@ class PatientRepository {
                 patientId
             }
         } catch (e: Exception) {
-            throw PatientException.CreatePatientFailedException()
+            throw PatientException.CreatePatientFailedException(message = "创建患者时出错: ${e.message}")
         }
     }
 
@@ -86,11 +86,11 @@ class PatientRepository {
         return try {
             transaction {
                 !PatientEntity.find {
-                    (Patients.hospitalId eq hospitalId) and (Patients.patientId eq patientId) and (Patients.isDeleted eq false)
+                    (Patients.hospitalId eq hospitalId) and (Patients.patientId eq patientId)
                 }.empty()
             }
         } catch (e: Exception) {
-            throw PatientException.PatientDataInvalidException()
+            throw PatientException.PatientDataInvalidException(message = "检查患者是否存在时出错: ${e.message}")
         }
     }
 
@@ -206,9 +206,10 @@ class PatientRepository {
         return try {
             transaction {
                 PatientEntity.find {
-                    (Patients.name like "%$keyword%") or
+                    ((Patients.name like "%$keyword%") or
                     (Patients.patientId like "%$keyword%") or
-                    (Patients.hospitalId like "%$keyword%")
+                    (Patients.hospitalId like "%$keyword%")) and
+                    (Patients.isDeleted eq false)
                 }
                     .limit(size)
                     .offset(page.toLong() * size)
@@ -270,6 +271,24 @@ class PatientRepository {
                     byBloodType = byBloodType,
                     recentPatients = recentPatients
                 )
+            }
+        } catch (e: Exception) {
+            throw PatientException.PatientNotFoundException()
+        }
+    }
+
+    /**
+     * 获取所有患者列表（分页）
+     */
+    suspend fun findAllPatients(page: Int = 0, size: Int = 20): List<PatientDto.PatientListItem> {
+        return try {
+            transaction {
+                PatientEntity.find { Patients.isDeleted eq false }
+                    .limit(size)
+                    .offset(page.toLong() * size)
+                    .map { entity ->
+                        entity.toPatientListItem()
+                    }
             }
         } catch (e: Exception) {
             throw PatientException.PatientNotFoundException()

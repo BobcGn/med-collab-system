@@ -16,7 +16,7 @@ sealed class PatientDto {
         val patientId: String,
         val name: String,
         val gender: Gender,
-        val birthDate: String,
+        val birthDate: String? = null,
         val phone: String? = null,
         val idCard: String? = null,
         val department: String,

@@ -10,7 +10,7 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
 }
 
 application {
-    mainClass = "com.example.medcollab.auth.ApplicationKt"
+    mainClass = "com.example.ApplicationKt"
 }
 
 tasks.register("prepareKotlinBuildScriptModel")

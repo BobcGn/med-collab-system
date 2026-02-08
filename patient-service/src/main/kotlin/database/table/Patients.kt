@@ -6,8 +6,8 @@ import org.jetbrains.exposed.sql.javatime.date
 import org.jetbrains.exposed.sql.javatime.datetime
 import java.util.UUID
 
-object Patients : IdTable<String>("patient.patients") {
-    val hospitalId = varchar("hospital_id", length = 20)
+object Patients : IdTable<String>("patients") {
+    val hospitalId = varchar("hospital_id", length = 50)
     val patientId = varchar("patient_id", length = 50)
     val name = varchar("name", length = 100)
     val gender = text("gender")
@@ -22,8 +22,8 @@ object Patients : IdTable<String>("patient.patients") {
     val chiefComplaint = text("chief_complaint").nullable()
     val heightCm = short("height_cm").nullable()
     val weightKg = decimal("weight_kg", precision = 5, scale = 2).nullable()
-    val bloodType = text("blood_type").nullable().default("'Unknown'")
-    val status = text("status").default("'active'")
+    val bloodType = text("blood_type").nullable().default("Unknown")
+    val status = text("status").default("active")
     val firstVisitDate = datetime("first_visit_date").nullable()
     val lastVisitDate = datetime("last_visit_date").nullable()
     val isDeleted = bool("is_deleted").default(false)

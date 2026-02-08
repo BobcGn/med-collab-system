@@ -82,7 +82,7 @@
             placeholder="搜索科室..."
             @input="handleDepartmentSearch"
           />
-          <button @click="showAddDepartment = true" class="btn-primary">添加科室</button>
+          <button @click="handleAddDepartment" class="btn-primary">添加科室</button>
           <button @click="fetchDepartments">刷新</button>
         </div>
       </div>
@@ -461,6 +461,16 @@ const editDepartment = (dept) => {
     name: dept.name,
   }
   showEditDepartment.value = true
+}
+
+/**
+ * 处理添加科室按钮点击事件
+ * 自动填充当前选择的医院ID到科室表单
+ */
+const handleAddDepartment = () => {
+  // 自动填充当前选择的医院ID
+  departmentForm.value.hospitalId = departmentHospitalId.value
+  showAddDepartment.value = true
 }
 
 const confirmDeleteDepartment = (dept) => {

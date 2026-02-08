@@ -116,6 +116,7 @@ fun Application.configureStatusPages() {
 
         // 处理其他常见异常类型
         exception<IllegalArgumentException> { call, throwable ->
+            call.application.environment.log.error("参数验证失败: ${throwable.message}", throwable)
             call.respond(
                 HttpStatusCode.BadRequest,
                 JsonObject(mapOf(

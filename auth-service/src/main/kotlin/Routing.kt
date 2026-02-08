@@ -48,6 +48,62 @@ fun Application.configureRouting() {
             call.respond(HttpStatusCode.OK, result)
         }
         
+        // 刷新token - 公开路由，即使令牌过期也能访问
+        post("/refresh") {
+            // 从请求头中获取token
+            val authHeader = call.request.headers["Authorization"]
+            val token = authHeader?.removePrefix("Bearer ") ?: throw Exception("缺少token")
+            
+            try {
+                // 使用JwtUtil验证token并提取用户信息
+                val userId = jwtUtil.getUserIdFromToken(token) ?: throw Exception("无效的token")
+                val newToken = userService.refreshToken(userId)
+                call.respond(HttpStatusCode.OK, mapOf("token" to newToken))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "刷新token失败: ${e.message}"))
+            }
+        }
+
+        // ============ 医院和部门相关 API（公开访问） ============
+        // 获取所有医院
+        get("/hospitals") {
+            val includeInactive = call.request.queryParameters["includeInactive"]?.toBoolean() ?: false
+            val hospitals = if (includeInactive) {
+                hospitalRepository.findAllHospitals()
+            } else {
+                hospitalRepository.findAllActiveHospitals()
+            }
+            call.respond(HttpStatusCode.OK, hospitals)
+        }
+
+        // 获取指定医院信息
+        get("/hospitals/{id}") {
+            val id = call.parameters["id"] ?: throw Exception("缺少医院ID")
+            val hospital = hospitalRepository.findHospitalById(id)
+                ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "医院不存在"))
+            call.respond(HttpStatusCode.OK, hospital)
+        }
+
+        // 获取指定医院的所有部门
+        get("/hospitals/{hospitalId}/departments") {
+            val hospitalId = call.parameters["hospitalId"] ?: throw Exception("缺少医院ID")
+            val includeInactive = call.request.queryParameters["includeInactive"]?.toBoolean() ?: false
+            val departments = if (includeInactive) {
+                departmentRepository.findAllDepartmentsByHospitalId(hospitalId)
+            } else {
+                departmentRepository.findActiveDepartmentsByHospitalId(hospitalId)
+            }
+            call.respond(HttpStatusCode.OK, departments)
+        }
+
+        // 获取指定部门信息
+        get("/departments/{id}") {
+            val id = call.parameters["id"] ?: throw Exception("缺少部门ID")
+            val department = departmentRepository.findDepartmentById(id)
+                ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "部门不存在"))
+            call.respond(HttpStatusCode.OK, department)
+        }
+        
         // 需要认证的路由
         authenticate("jwt") {
                 // 获取当前用户信息
@@ -56,14 +112,6 @@ fun Application.configureRouting() {
                     val userId = principal?.payload?.subject ?: throw Exception("Token中缺少用户ID")
                     val user = userService.getUserInfo(userId)
                     call.respond(HttpStatusCode.OK, user)
-                }
-                
-                // 刷新token
-                post("/refresh") {
-                    val principal = call.principal<JWTPrincipal>()
-                    val userId = principal?.payload?.subject ?: throw Exception("Token中缺少用户ID")
-                    val newToken = userService.refreshToken(userId)
-                    call.respond(HttpStatusCode.OK, mapOf("token" to newToken))
                 }
                 
                 // 获取指定用户信息
@@ -227,26 +275,7 @@ fun Application.configureRouting() {
                     call.respond(HttpStatusCode.OK, user)
                 }
 
-                // ============ 医院相关 API ============
-                // 获取所有医院
-                get("/hospitals") {
-                    val includeInactive = call.request.queryParameters["includeInactive"]?.toBoolean() ?: false
-                    val hospitals = if (includeInactive) {
-                        hospitalRepository.findAllHospitals()
-                    } else {
-                        hospitalRepository.findAllActiveHospitals()
-                    }
-                    call.respond(HttpStatusCode.OK, hospitals)
-                }
-
-                // 获取指定医院信息
-                get("/hospitals/{id}") {
-                    val id = call.parameters["id"] ?: throw Exception("缺少医院ID")
-                    val hospital = hospitalRepository.findHospitalById(id)
-                        ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "医院不存在"))
-                    call.respond(HttpStatusCode.OK, hospital)
-                }
-
+                // ============ 医院和部门管理 API（需要认证） ============
                 // 创建医院（仅管理员）
                 post("/hospitals") {
                     val principal = call.principal<JWTPrincipal>()
@@ -281,27 +310,6 @@ fun Application.configureRouting() {
                     } else {
                         call.respond(HttpStatusCode.NotFound, mapOf("error" to "医院不存在"))
                     }
-                }
-
-                // ============ 部门相关 API ============
-                // 获取指定医院的所有部门
-                get("/hospitals/{hospitalId}/departments") {
-                    val hospitalId = call.parameters["hospitalId"] ?: throw Exception("缺少医院ID")
-                    val includeInactive = call.request.queryParameters["includeInactive"]?.toBoolean() ?: false
-                    val departments = if (includeInactive) {
-                        departmentRepository.findAllDepartmentsByHospitalId(hospitalId)
-                    } else {
-                        departmentRepository.findActiveDepartmentsByHospitalId(hospitalId)
-                    }
-                    call.respond(HttpStatusCode.OK, departments)
-                }
-
-                // 获取指定部门信息
-                get("/departments/{id}") {
-                    val id = call.parameters["id"] ?: throw Exception("缺少部门ID")
-                    val department = departmentRepository.findDepartmentById(id)
-                        ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "部门不存在"))
-                    call.respond(HttpStatusCode.OK, department)
                 }
 
                 // 创建部门（仅管理员）

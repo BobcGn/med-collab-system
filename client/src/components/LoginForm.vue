@@ -32,18 +32,66 @@
             </div>
           </div>
 
-          <!-- 登录表单 -->
-          <div class="form-group">
-            <label for="username" class="form-label">用户名</label>
-            <input
-              id="username"
-              v-model="formData.username"
-              type="text"
-              :placeholder="formData.role === 'admin' ? '请输入管理员账号（admin-用户id）' : '请输入用户账号（医院id-部门id-用户id）'"
-              required
-              class="form-input"
-            />
+          <!-- 管理员登录表单 -->
+          <div v-if="formData.role === 'admin'" class="admin-form">
+            <div class="form-group">
+              <label for="admin-serial" class="form-label">管理员序列号</label>
+              <input
+                id="admin-serial"
+                v-model="formData.serialNumber"
+                type="text"
+                placeholder="请输入管理员序列号"
+                required
+                class="form-input"
+              />
+            </div>
           </div>
+
+          <!-- 用户登录表单 -->
+          <div v-else-if="formData.role === 'user'" class="user-form">
+            <div class="form-group">
+              <label for="hospitalId" class="form-label">所属医院</label>
+              <select
+                id="hospitalId"
+                v-model="formData.hospitalId"
+                required
+                @change="handleHospitalChange"
+                class="form-input"
+              >
+                <option value="">请选择医院</option>
+                <option v-for="hospital in hospitals" :key="hospital.id" :value="hospital.id">
+                  {{ hospital.name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="deptCode" class="form-label">所属部门</label>
+              <select
+                id="deptCode"
+                v-model="formData.deptCode"
+                required
+                class="form-input"
+              >
+                <option value="">请选择部门</option>
+                <option v-for="dept in departments" :key="dept.id" :value="dept.id">
+                  {{ dept.name }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="user-serial" class="form-label">用户序列号</label>
+              <input
+                id="user-serial"
+                v-model="formData.serialNumber"
+                type="text"
+                placeholder="请输入用户序列号"
+                required
+                class="form-input"
+              />
+            </div>
+          </div>
+
+          <!-- 通用密码表单 -->
           <div class="form-group">
             <label for="password" class="form-label">密码</label>
             <input
@@ -72,7 +120,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { authApi } from '../utils/api.js'
 import { authStore } from '../utils/auth.js'
 import { useRouter } from 'vue-router'
@@ -81,20 +129,75 @@ const router = useRouter()
 
 const formData = ref({
   role: 'user',
-  username: '',
+  hospitalId: '',
+  deptCode: '',
+  serialNumber: '',
   password: '',
 })
 
 const loading = ref(false)
 const errorMessage = ref('')
+const hospitals = ref([])
+const departments = ref([])
+
+// 加载医院列表
+const loadHospitals = async () => {
+  try {
+    // 设置includeInactive为true，获取所有医院（包括非激活状态的）
+    const result = await authApi.getAllHospitals(true)
+    hospitals.value = Array.isArray(result) ? result : []
+    console.log('加载的医院列表:', hospitals.value)
+  } catch (error) {
+    console.error('加载医院列表失败:', error)
+  }
+}
+
+// 加载部门列表
+const loadDepartments = async (hospitalId) => {
+  if (!hospitalId) {
+    departments.value = []
+    return
+  }
+
+  try {
+    // 设置includeInactive为true，获取所有部门（包括非激活状态的）
+    const result = await authApi.getHospitalDepartments(hospitalId, true)
+    departments.value = Array.isArray(result) ? result : []
+    console.log('加载的部门列表:', departments.value)
+  } catch (error) {
+    console.error('加载部门列表失败:', error)
+  }
+}
+
+// 医院选择变化处理
+const handleHospitalChange = () => {
+  formData.value.deptCode = ''
+  loadDepartments(formData.value.hospitalId)
+}
+
+// 页面加载时获取医院列表
+onMounted(() => {
+  loadHospitals()
+})
 
 const handleLogin = async () => {
   loading.value = true
   errorMessage.value = ''
 
   try {
+    let username = ''
+    
+    // 根据角色生成用户名
+    if (formData.value.role === 'admin') {
+      // 管理员用户名格式: admin-序列号
+      username = `admin-${formData.value.serialNumber}`
+    } else if (formData.value.role === 'user') {
+      // 用户用户名格式: 医院id-部门id-序列号
+      username = `${formData.value.hospitalId}-${formData.value.deptCode}-${formData.value.serialNumber}`
+    }
+
     const result = await authApi.login({
-      username: formData.value.username,
+      username: username,
       password: formData.value.password,
     })
 
@@ -105,7 +208,7 @@ const handleLogin = async () => {
     // 跳转到首页
     router.push('/')
   } catch (error) {
-    errorMessage.value = error.message || '登录失败，请检查用户名和密码'
+    errorMessage.value = error.message || '登录失败，请检查输入信息'
   } finally {
     loading.value = false
   }
@@ -345,6 +448,23 @@ select.form-input {
   cursor: not-allowed;
   transform: none;
   box-shadow: 0 2px 6px rgba(102, 126, 234, 0.2);
+}
+
+/* 表单切换动画 */
+.admin-form,
+.user-form {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 注册链接 */

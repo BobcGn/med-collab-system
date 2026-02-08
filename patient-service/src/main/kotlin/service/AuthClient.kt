@@ -16,7 +16,8 @@ import io.ktor.client.plugins.logging.*
  * 用于调用 auth-service 的 API 进行用户验证和权限检查
  */
 class AuthClient(
-    private val baseUrl: String = "http://localhost:8081"
+    private val baseUrl: String = "http://localhost:8081",
+    private val token: String? = null
 ) {
     private val httpClient = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -30,9 +31,13 @@ class AuthClient(
     /**
      * 根据ID获取用户信息
      */
-    suspend fun getUserInfo(userId: String): UserDto.UserInfo? {
+    suspend fun getUserInfo(userId: String, token: String? = null): UserDto.UserInfo? {
         return try {
-            httpClient.get("$baseUrl/api/users/$userId").body()
+            httpClient.get("$baseUrl/users/$userId") {
+                if (token != null) {
+                    header("Authorization", "Bearer $token")
+                }
+            }.body()
         } catch (e: Exception) {
             return null
         }
@@ -41,11 +46,14 @@ class AuthClient(
     /**
      * 批量获取用户信息
      */
-    suspend fun getUserInfos(userIds: List<String>): List<UserDto.UserInfo> {
+    suspend fun getUserInfos(userIds: List<String>, token: String? = null): List<UserDto.UserInfo> {
         return try {
-            httpClient.post("$baseUrl/api/users/batch") {
+            httpClient.post("$baseUrl/users/batch") {
                 contentType(ContentType.Application.Json)
                 setBody(UserIdsRequest(userIds))
+                if (token != null) {
+                    header("Authorization", "Bearer $token")
+                }
             }.body()
         } catch (e: Exception) {
             return emptyList()
@@ -55,39 +63,39 @@ class AuthClient(
     /**
      * 检查用户是否存在
      */
-    suspend fun userExists(userId: String): Boolean {
-        return getUserInfo(userId) != null
+    suspend fun userExists(userId: String, token: String? = null): Boolean {
+        return getUserInfo(userId, token) != null
     }
 
     /**
      * 检查用户是否为管理员
      */
-    suspend fun isAdmin(userId: String): Boolean {
-        val user = getUserInfo(userId) ?: return false
+    suspend fun isAdmin(userId: String, token: String? = null): Boolean {
+        val user = getUserInfo(userId, token) ?: return false
         return user.role == "admin"
     }
 
     /**
      * 检查用户是否为医生
      */
-    suspend fun isDoctor(userId: String): Boolean {
-        val user = getUserInfo(userId) ?: return false
+    suspend fun isDoctor(userId: String, token: String? = null): Boolean {
+        val user = getUserInfo(userId, token) ?: return false
         return user.role == "doctor"
     }
 
     /**
      * 获取用户角色
      */
-    suspend fun getUserRole(userId: String): String? {
-        val user = getUserInfo(userId) ?: return null
+    suspend fun getUserRole(userId: String, token: String? = null): String? {
+        val user = getUserInfo(userId, token) ?: return null
         return user.role
     }
 
     /**
      * 获取用户的医院ID
      */
-    suspend fun getUserHospitalId(userId: String): String? {
-        val user = getUserInfo(userId) ?: return null
+    suspend fun getUserHospitalId(userId: String, token: String? = null): String? {
+        val user = getUserInfo(userId, token) ?: return null
         return user.hospitalId
     }
 
@@ -140,9 +148,10 @@ class AuthClient(
      */
     suspend fun canModifyPatient(
         requesterId: String,
-        patientAttendingDoctorId: String
+        patientAttendingDoctorId: String,
+        token: String? = null
     ): Boolean {
-        val requester = getUserInfo(requesterId) ?: return false
+        val requester = getUserInfo(requesterId, token) ?: return false
 
         // 管理员可以修改所有患者
         if (requester.role == "admin") {
@@ -156,20 +165,32 @@ class AuthClient(
     /**
      * 验证医生ID是否有效且存在
      */
-    suspend fun validateDoctor(doctorId: String): Boolean {
-        val user = getUserInfo(doctorId) ?: return false
+    suspend fun validateDoctor(doctorId: String, token: String? = null): Boolean {
+        val user = getUserInfo(doctorId, token) ?: return false
         return user.role == "doctor" && !user.isDeleted && !user.isFrozen
     }
 
     /**
      * 获取科室医生列表
      */
-    suspend fun getDepartmentDoctors(hospitalId: String, deptCode: String): List<UserDto.UserInfo> {
+    suspend fun getDepartmentDoctors(hospitalId: String, deptCode: String, token: String? = null): List<UserDto.UserInfo> {
         return try {
-            httpClient.get("$baseUrl/api/users/department/$hospitalId/$deptCode/doctors").body()
+            httpClient.get("$baseUrl/users/doctors/$hospitalId/$deptCode") {
+                if (token != null) {
+                    header("Authorization", "Bearer $token")
+                }
+            }.body()
         } catch (e: Exception) {
             return emptyList()
         }
+    }
+
+    /**
+     * 获取医生的真实姓名
+     */
+    suspend fun getDoctorName(doctorId: String, token: String? = null): String? {
+        val user = getUserInfo(doctorId, token) ?: return doctorId // 如果获取失败，返回医生ID作为 fallback
+        return user.fullName ?: user.username ?: doctorId
     }
 
     /**
