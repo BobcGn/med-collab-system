@@ -466,6 +466,172 @@ const patientRequest = async (url, options = {}) => {
   }
 }
 
+// Metric服务 API 配置（通过网关访问）
+const METRIC_API_BASE_URL = 'http://localhost:8088'
+
+const metricRequest = async (url, options = {}) => {
+  const token = localStorage.getItem('token')
+
+  // 修正URL构建逻辑 - 处理不同URL格式
+  let fullUrl
+  if (url.startsWith('/')) {
+    // 以/开头的路径
+    fullUrl = `${METRIC_API_BASE_URL}${url}`
+  } else if (url.startsWith('?')) {
+    // 以?开头的查询参数
+    fullUrl = `${METRIC_API_BASE_URL}${url}`
+  } else if (url) {
+    // 其他非空路径
+    fullUrl = `${METRIC_API_BASE_URL}/${url}`
+  } else {
+    // 空路径
+    fullUrl = METRIC_API_BASE_URL
+  }
+
+  console.log('[Metric API] 请求URL:', fullUrl)
+  console.log('[Metric API] Token存在:', !!token)
+  console.log('[Metric API] Token前缀:', token?.substring(0, 20))
+
+  const config = {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+      ...options.headers,
+    },
+  }
+
+  // 记录请求体(仅用于调试)
+  if (options.body) {
+    try {
+      const requestBody = JSON.parse(options.body)
+      console.log('[Metric API] 请求体数据:', JSON.stringify(requestBody, null, 2))
+    } catch (e) {
+      console.log('[Metric API] 请求体原始数据:', options.body)
+    }
+  }
+
+  console.log('[Metric API] 请求头Authorization:', config.headers.Authorization ? config.headers.Authorization.substring(0, 30) : '未设置')
+
+  // 请求metric数据，若返回 401/502/503，则尝试刷新 Token 或重试一次后再报错
+  let retryMetric = false
+  let retry502 = false
+  try {
+    let response = await fetch(fullUrl, config)
+
+    console.log('[Metric API] 响应状态:', response.status)
+    console.log('[Metric API] 响应OK:', response.ok)
+
+    // 如果服务端返回 502/503，尝试一次简单重试以应对短暂网关问题
+    if (!response.ok && (response.status === 502 || response.status === 503) && !retry502) {
+      retry502 = true
+      console.warn('[Metric API] 收到后端网关错误 (502/503)，尝试重试一次')
+      response = await fetch(fullUrl, config)
+      console.log('[Metric API] 重试后响应状态:', response.status)
+      console.log('[Metric API] 重试后响应OK:', response.ok)
+    }
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
+      console.error('[Metric API] 请求失败，详细信息:', {
+        status: response.status,
+        url: fullUrl,
+        error: error,
+        requestBody: options.body
+      })
+      // 401 时尝试自动刷新 Token
+      if (response.status === 401 && token && !retryMetric) {
+        try {
+          const refreshResp = await fetch(`${API_BASE_URL}/refresh`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          })
+          if (refreshResp.ok) {
+            const refreshData = await refreshResp.json()
+            const newToken = refreshData?.token
+            if (newToken) {
+              localStorage.setItem('token', newToken)
+              // 更新请求头中的 token，然后重试
+              config.headers = {
+                ...config.headers,
+                Authorization: `Bearer ${newToken}`,
+              }
+              retryMetric = true
+              response = await fetch(fullUrl, config)
+              if (!response.ok) {
+                const err2 = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
+                console.error('[Metric API] 重试请求失败，详细信息:', {
+                  status: response.status,
+                  url: fullUrl,
+                  error: err2
+                })
+                throw new Error(err2.message || `请求失败 (${response.status})`)
+              }
+            }
+          } else {
+            // 刷新 Token 失败，说明当前 Token 已完全无效，跳转到登录页
+            console.error('[Metric API] 刷新 Token 失败，跳转到登录页')
+            // 清除认证信息
+            localStorage.removeItem('token')
+            localStorage.removeItem('currentUser')
+            // 跳转到登录页
+            window.location.href = '/login'
+            throw new Error('登录已过期，请重新登录')
+          }
+        } catch (e) {
+          // 刷新 Token 时发生错误，说明当前 Token 已完全无效，跳转到登录页
+          console.error('[Metric API] 刷新 Token 时发生错误，跳转到登录页:', e)
+          // 清除认证信息
+          localStorage.removeItem('token')
+          localStorage.removeItem('currentUser')
+          // 跳转到登录页
+          window.location.href = '/login'
+          throw new Error('登录已过期，请重新登录')
+        }
+      }
+      // 构建详细的错误信息
+      const errorMessage = error.message || error.error || error.detail || `请求失败 (${response.status})`
+      const detailedError = `${errorMessage} (状态码: ${response.status})`
+      console.error('[Metric API] 详细错误信息:', detailedError)
+      throw new Error(detailedError)
+    }
+
+    // 处理空响应体的情况
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      // 如果响应体不是JSON，返回空数组
+      console.log('[Metric API] 响应体不是JSON，返回空数组')
+      return []
+    }
+
+    // 尝试解析响应体
+    try {
+      // 先检查响应体是否为空
+      const text = await response.text()
+      if (!text) {
+        // 如果响应体为空，返回空数组
+        console.log('[Metric API] 响应体为空，返回空数组')
+        return []
+      }
+      // 如果响应体不为空，尝试解析它
+      const data = JSON.parse(text)
+      console.log('[Metric API] 响应体解析成功:', data)
+      return data
+    } catch (e) {
+      // 如果解析失败，返回空数组
+      console.log('[Metric API] 响应体解析失败，返回空数组:', e)
+      return []
+    }
+  } catch (error) {
+    console.error('Metric API请求异常:', error)
+    throw error
+  }
+}
+
 export const patientApi = {
   // 获取患者列表（分页）
   getPatients: (params = {}) => {
@@ -551,4 +717,62 @@ export const patientApi = {
       method: 'GET',
     })
   },
+}
+
+export const metricApi = {
+  // ==================== 医学影像 API ====================
+  // 获取所有医学影像
+  getAllMedicalImages: () => metricRequest('/images', {
+    method: 'GET',
+  }),
+
+  // 创建医学影像
+  createMedicalImage: (data) => metricRequest('/images', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  // 根据患者姓名查询医学影像
+  getMedicalImagesByPatientName: (patientName) => metricRequest(`/images/patient/${encodeURIComponent(patientName)}`, {
+    method: 'GET',
+  }),
+
+  // 删除医学影像
+  deleteMedicalImage: (id) => metricRequest(`/images/${id}`, {
+    method: 'DELETE',
+  }),
+
+  // ==================== 分析结果 API ====================
+  // 获取所有分析结果
+  getAllAnalysisResults: () => metricRequest('/analyses', {
+    method: 'GET',
+  }),
+
+  // 创建分析结果
+  createAnalysisResult: (data) => metricRequest('/analyses', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  // 根据患者姓名查询分析结果
+  getAnalysisResultsByPatientName: (patientName) => metricRequest(`/analyses/patient/${encodeURIComponent(patientName)}`, {
+    method: 'GET',
+  }),
+
+  // ==================== 报表 API ====================
+  // 获取所有报表
+  getAllReports: () => metricRequest('/reports', {
+    method: 'GET',
+  }),
+
+  // 创建报表
+  createReport: (data) => metricRequest('/reports', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
+
+  // 根据患者姓名查询报表
+  getReportsByPatientName: (patientName) => metricRequest(`/reports/patient/${encodeURIComponent(patientName)}`, {
+    method: 'GET',
+  }),
 }
