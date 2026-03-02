@@ -11,4 +11,7 @@ import io.ktor.server.routing.*
 import org.jetbrains.exposed.sql.*
 
 fun Application.configureSerialization() {
+    install(ContentNegotiation){
+        json()
+    }
 }
