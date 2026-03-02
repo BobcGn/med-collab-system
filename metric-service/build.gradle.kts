@@ -5,7 +5,7 @@ plugins {
 }
 
 application {
-    mainClass = "com.example.medcollab.metric.ApplicationKt"
+    mainClass = "com.example.ApplicationKt"
 }
 tasks.register("prepareKotlinBuildScriptModel")
 dependencies {

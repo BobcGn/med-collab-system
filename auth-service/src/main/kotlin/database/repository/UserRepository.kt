@@ -11,8 +11,8 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.transaction
 
 class UserRepository(
-    private val hospitalRepository: com.example.database.repository.HospitalRepository,
-    private val departmentRepository: com.example.database.repository.DepartmentRepository
+    private val hospitalRepository: HospitalRepository,
+    private val departmentRepository: DepartmentRepository
 ) {
     /**
      * 创建新用户
