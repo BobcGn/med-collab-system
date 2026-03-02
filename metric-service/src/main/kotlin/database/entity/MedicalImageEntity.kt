@@ -10,6 +10,7 @@ class MedicalImageEntity(id: EntityID<String>) : Entity<String>(id) {
 
     var hospitalId by MedicalImages.hospitalId
     var patientId by MedicalImages.patientId
+    var patientName by MedicalImages.patientName
     var imageType by MedicalImages.imageType
     var filePath by MedicalImages.filePath
     var fileSize by MedicalImages.fileSize

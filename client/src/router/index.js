@@ -92,6 +92,43 @@ const routes = [
         component: () => import('../components/ReportManage.vue'),
         meta: { requiresAuth: true },
       },
+      // Metric模块路由
+      {
+        path: 'metric/images',
+        name: 'MedicalImageManage',
+        component: () => import('../components/MedicalImageManage.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'metric/images/chat',
+        name: 'MedicalImageChat',
+        component: () => import('../components/MedicalImageChat.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'metric/analyses',
+        name: 'AnalysisResultManage',
+        component: () => import('../components/AnalysisResultManage.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'metric/analyses/detail',
+        name: 'AnalysisResultDetail',
+        component: () => import('../components/AnalysisResultDetail.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'metric/reports',
+        name: 'MetricReportManage',
+        component: () => import('../components/MetricReportManage.vue'),
+        meta: { requiresAuth: true },
+      },
+      {
+        path: 'metric/reports/list',
+        name: 'ReportList',
+        component: () => import('../components/ReportList.vue'),
+        meta: { requiresAuth: true },
+      },
     ]
   },
   // 兼容旧路由

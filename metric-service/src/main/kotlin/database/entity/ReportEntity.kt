@@ -10,6 +10,7 @@ class ReportEntity(id: EntityID<String>) : Entity<String>(id) {
 
     var hospitalId by Reports.hospitalId
     var patientId by Reports.patientId
+    var patientName by Reports.patientName
     var analysisIds by Reports.analysisIds
     var reportType by Reports.reportType
     var filePath by Reports.filePath

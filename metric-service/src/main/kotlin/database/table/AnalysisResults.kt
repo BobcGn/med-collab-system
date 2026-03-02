@@ -3,11 +3,13 @@ package database.table
 import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.datetime
+import java.util.UUID
 
 object AnalysisResults : IdTable<String>("analysis.analysis_results") {
     val hospitalId = varchar("hospital_id", length = 20)
     val imageId = varchar("image_id", length = 36)
     val patientId = varchar("patient_id", length = 36)
+    val patientName = varchar("patient_name", length = 100)
     val metrics = text("metrics")
     val status = text("status").default("'pending'")
     val errorMessage = text("error_message").nullable()
@@ -15,4 +17,5 @@ object AnalysisResults : IdTable<String>("analysis.analysis_results") {
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
     val completedAt = datetime("completed_at").nullable()
     override val id = varchar("id", length = 36).autoIncrement().entityId()
+    fun generateId(): String = UUID.randomUUID().toString()
 }

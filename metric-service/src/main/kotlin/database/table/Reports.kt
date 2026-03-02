@@ -3,10 +3,12 @@ package database.table
 import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.datetime
+import java.util.UUID
 
 object Reports : IdTable<String>("analysis.reports") {
     val hospitalId = varchar("hospital_id", length = 20)
     val patientId = varchar("patient_id", length = 36)
+    val patientName = varchar("patient_name", length = 100)
     val analysisIds = text("analysis_ids")
     val reportType = varchar("report_type", length = 30)
     val filePath = varchar("file_path", length = 512).nullable()
@@ -17,4 +19,5 @@ object Reports : IdTable<String>("analysis.reports") {
     val generatedAt = datetime("generated_at").nullable()
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
     override val id = varchar("id", length = 36).autoIncrement().entityId()
+    fun generateId(): String = UUID.randomUUID().toString()
 }
