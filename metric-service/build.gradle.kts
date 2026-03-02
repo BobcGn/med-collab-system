@@ -38,6 +38,9 @@ dependencies {
     // Logging
     implementation("ch.qos.logback:logback-classic:1.4.14")
 
+    // Koog
+    implementation("ai.koog:koog-ktor:0.5.1")
+
     // Testing
     testImplementation("io.ktor:ktor-server-test-host-jvm:3.3.2")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.2.21")

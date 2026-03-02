@@ -7,4 +7,4 @@ dependencyResolutionManagement {
     }
 }
 
-include(":auth-service", ":report-service", ":shared", ":patient-service", ":metric-service",":api-gateway")
+include(":auth-service", ":shared", ":patient-service", ":metric-service",":api-gateway")
