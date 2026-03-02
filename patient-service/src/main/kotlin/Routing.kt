@@ -117,7 +117,7 @@ fun Application.configureRouting() {
 
                     application.log.info("查询患者列表参数: hospitalId=$hospitalId, department=$department, attendingDoctorId=$attendingDoctorId, status=$statusStr, page=$page, size=$size")
 
-                    val status = statusStr?.let { enumValueOf<enums.Status>(it) }
+                    val status = statusStr?.let { enums.Status.valueOf(it) }
 
                     val patients = patientService.findPatientsByParams(
                         hospitalId = hospitalId,
@@ -198,7 +198,7 @@ fun Application.configureRouting() {
                 val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
                 val request = call.receive<Map<String, String>>()
                 val statusStr = request["status"] ?: throw PatientException.PatientDataInvalidException()
-                val status = enumValueOf<enums.Status>(statusStr)
+                val status = enums.Status.valueOf(statusStr)
                 val success = patientService.updatePatientStatus(patientId, status, operatorId, token)
                 call.respond(HttpStatusCode.OK, mapOf("success" to success))
             }
