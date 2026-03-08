@@ -1,7 +1,7 @@
 plugins {
-    kotlin("jvm") version "2.2.21" apply false
-    id("io.ktor.plugin") version "3.3.2" apply false
-    kotlin("plugin.serialization") version "2.2.21" apply false
+    alias(libs.plugins.kotlin.jvm) apply false
+    alias(libs.plugins.ktor) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
 }
 
 allprojects {
