@@ -14,6 +14,7 @@ koog = "0.5.1"
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlin-test-junit = { module = "org.jetbrains.kotlin:kotlin-test-junit", version.ref = "kotlin" }
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 
 ktor-server-core-jvm = { module = "io.ktor:ktor-server-core-jvm", version.ref = "ktor" }
 ktor-server-netty-jvm = { module = "io.ktor:ktor-server-netty-jvm", version.ref = "ktor" }
@@ -51,6 +52,50 @@ logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "lo
 koog-ktor = { module = "ai.koog:koog-ktor", version.ref = "koog" }
 
 ktor-server-core = { module = "io.ktor:ktor-server-core", version.ref = "ktor" }
+
+[bundles]
+ktor-server-base-jvm = [
+    "ktor-server-core-jvm",
+    "ktor-server-netty-jvm",
+    "ktor-server-cors-jvm",
+    "ktor-server-content-negotiation-jvm",
+    "ktor-serialization-kotlinx-json-jvm",
+]
+ktor-server-auth = [
+    "ktor-server-auth",
+    "ktor-server-auth-jwt",
+]
+ktor-server-config-jvm = [
+    "ktor-server-config-yaml",
+    "ktor-server-host-common-jvm",
+    "ktor-server-status-pages-jvm",
+]
+ktor-client-base-jvm = [
+    "ktor-client-core-jvm",
+    "ktor-client-cio-jvm",
+]
+exposed-main = [
+    "exposed-core",
+    "exposed-jdbc",
+    "exposed-dao",
+    "exposed-java-time",
+]
+exposed-legacy-h2 = [
+    "exposed-core-legacy",
+    "exposed-jdbc-legacy",
+    "h2",
+]
+ktor-shared-security = [
+    "ktor-serialization-kotlinx-json-jvm",
+    "ktor-server-config-yaml",
+    "ktor-server-core",
+    "ktor-server-auth",
+    "ktor-server-auth-jwt",
+]
+test-kotlin-ktor-server = [
+    "kotlin-test-junit",
+    "ktor-server-test-host-jvm",
+]
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
