@@ -1,48 +1,28 @@
 plugins {
-    kotlin("jvm") version "2.2.21"
-    id("io.ktor.plugin") version "3.3.2"
-    kotlin("plugin.serialization") version "2.2.21"
+    alias(libs.plugins.ktor)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 application {
     mainClass = "com.example.ApplicationKt"
 }
-tasks.register("prepareKotlinBuildScriptModel")
 dependencies {
-    // Ktor Core
-    implementation("io.ktor:ktor-server-core-jvm:3.3.2")
-    implementation("io.ktor:ktor-server-netty-jvm:3.3.2")
-    implementation("io.ktor:ktor-server-cors-jvm:3.3.2")
-    implementation("io.ktor:ktor-server-content-negotiation-jvm:3.3.2")
-    implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:3.3.2")
-
-    // Ktor Server Auth (JWT)
-    implementation("io.ktor:ktor-server-auth-jwt:3.3.2")
-    implementation("io.ktor:ktor-server-auth:3.3.2")
-
-    // Ktor Server Config
-    implementation("io.ktor:ktor-server-config-yaml:3.3.2")
-    implementation("io.ktor:ktor-server-host-common-jvm:3.3.2")
-    implementation("io.ktor:ktor-server-status-pages-jvm:3.3.2")
+    implementation(libs.bundles.ktor.server.base.jvm)
+    implementation(libs.bundles.ktor.server.auth)
+    implementation(libs.bundles.ktor.server.config.jvm)
 
     // Shared Module
     implementation(project(":shared"))
 
-    // Database
-    implementation("org.jetbrains.exposed:exposed-core:0.61.0")
-    implementation("org.jetbrains.exposed:exposed-jdbc:0.61.0")
-    implementation("org.jetbrains.exposed:exposed-dao:0.61.0")
-    implementation("org.jetbrains.exposed:exposed-java-time:0.61.0")
-    implementation("com.mysql:mysql-connector-j:9.1.0")
+    implementation(libs.bundles.exposed.main)
+    implementation(libs.mysql.connector.j.v91)
 
     // Logging
-    implementation("ch.qos.logback:logback-classic:1.4.14")
+    implementation(libs.logback.classic)
 
     // Koog
-    implementation("ai.koog:koog-ktor:0.5.1")
+    implementation(libs.koog.ktor)
 
-    // Testing
-    testImplementation("io.ktor:ktor-server-test-host-jvm:3.3.2")
-    testImplementation("org.jetbrains.kotlin:kotlin-test-junit:2.2.21")
-    implementation(kotlin("test"))
+    testImplementation(libs.bundles.test.kotlin.ktor.server)
+    implementation(libs.kotlin.test)
 }
