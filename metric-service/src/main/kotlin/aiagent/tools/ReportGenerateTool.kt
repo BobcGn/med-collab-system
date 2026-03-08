@@ -1,9 +1,10 @@
-package database.aiagent.tools
+package aiagent.tools
 
 import ai.koog.agents.core.tools.Tool
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
+import java.time.LocalDateTime
 
 /**
  * 报表生成工具
@@ -39,7 +40,7 @@ object ReportGenerateTool: Tool<ReportGenerateTool.Args, String>() {
             // 实际项目中，这里应该调用真实的报表生成服务
             val report = """{
                 "reportId": "REP-${System.currentTimeMillis()}",
-                "generateTime": "${java.time.LocalDateTime.now()}",
+                "generateTime": "${LocalDateTime.now()}",
                 "analysisResult": ${args.analysisResult},
                 "reportContent": "基于医学影像分析结果生成的详细报告",
                 "reportStatus": "已生成",

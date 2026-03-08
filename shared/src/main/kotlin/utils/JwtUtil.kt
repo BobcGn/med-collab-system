@@ -17,6 +17,7 @@ class JwtUtil(config: ApplicationConfig) {
         val algorithm = com.auth0.jwt.algorithms.Algorithm.HMAC256(secret)
         com.auth0.jwt.JWT.require(algorithm)
             .withIssuer(issuer)
+            .withAudience(audience)
             .build()
     }
 

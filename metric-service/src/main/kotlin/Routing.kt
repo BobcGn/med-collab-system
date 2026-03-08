@@ -1,9 +1,14 @@
 package com.example
 
+import ai.koog.ktor.aiAgent
+import ai.koog.prompt.dsl.prompt
+import ai.koog.prompt.executor.clients.deepseek.DeepSeekModels
+import io.ktor.server.auth.*
 import com.example.database.repository.AnalysisRepository
 import com.example.database.repository.MedicalImageRepository
 import com.example.database.repository.ReportRepository
 import com.example.service.MetricService
+import aiagent.strategy.metricReportStrategy
 import dto.AnalysisResultDto
 import dto.MedicalImageDto
 import dto.ReportDto
@@ -200,6 +205,34 @@ fun Application.configureRouting() {
                     call.respond(HttpStatusCode.InternalServerError, mapOf(
                         "error" to e.message
                     ))
+                }
+            }
+        }
+
+        // ==================== AI Agent API ====================
+        authenticate("jwt") {
+            route("/ai") {
+                // 医疗影像分析与报表生成
+                post("/analyze-and-report") {
+                    try {
+                        val userInput = call.receiveText()
+
+                        // 调用 AI Agent 进行分析
+                        val output = aiAgent(
+                            strategy = metricReportStrategy,
+                            model = DeepSeekModels.DeepSeekReasoner,
+                            input = userInput
+                        )
+
+                        call.respond(HttpStatusCode.OK, mapOf(
+                            "result" to output
+                        ))
+                    } catch (e: Exception) {
+                        application.log.error("AI 分析失败", e)
+                        call.respond(HttpStatusCode.InternalServerError, mapOf(
+                            "error" to (e.message ?: "未知错误")
+                        ))
+                    }
                 }
             }
         }

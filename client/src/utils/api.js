@@ -513,6 +513,7 @@ const metricRequest = async (url, options = {}) => {
   }
 
   console.log('[Metric API] 请求头Authorization:', config.headers.Authorization ? config.headers.Authorization.substring(0, 30) : '未设置')
+  console.log('[Metric API] 完整请求头:', config.headers)
 
   // 请求metric数据，若返回 401/502/503，则尝试刷新 Token 或重试一次后再报错
   let retryMetric = false
@@ -722,57 +723,64 @@ export const patientApi = {
 export const metricApi = {
   // ==================== 医学影像 API ====================
   // 获取所有医学影像
-  getAllMedicalImages: () => metricRequest('/images', {
+  getAllMedicalImages: () => metricRequest('/metric/images', {
     method: 'GET',
   }),
 
   // 创建医学影像
-  createMedicalImage: (data) => metricRequest('/images', {
+  createMedicalImage: (data) => metricRequest('/metric/images', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
 
   // 根据患者姓名查询医学影像
-  getMedicalImagesByPatientName: (patientName) => metricRequest(`/images/patient/${encodeURIComponent(patientName)}`, {
+  getMedicalImagesByPatientName: (patientName) => metricRequest(`/metric/images/patient/${encodeURIComponent(patientName)}`, {
     method: 'GET',
   }),
 
   // 删除医学影像
-  deleteMedicalImage: (id) => metricRequest(`/images/${id}`, {
+  deleteMedicalImage: (id) => metricRequest(`/metric/images/${id}`, {
     method: 'DELETE',
   }),
 
   // ==================== 分析结果 API ====================
   // 获取所有分析结果
-  getAllAnalysisResults: () => metricRequest('/analyses', {
+  getAllAnalysisResults: () => metricRequest('/metric/analyses', {
     method: 'GET',
   }),
 
   // 创建分析结果
-  createAnalysisResult: (data) => metricRequest('/analyses', {
+  createAnalysisResult: (data) => metricRequest('/metric/analyses', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
 
   // 根据患者姓名查询分析结果
-  getAnalysisResultsByPatientName: (patientName) => metricRequest(`/analyses/patient/${encodeURIComponent(patientName)}`, {
+  getAnalysisResultsByPatientName: (patientName) => metricRequest(`/metric/analyses/patient/${encodeURIComponent(patientName)}`, {
     method: 'GET',
   }),
 
   // ==================== 报表 API ====================
   // 获取所有报表
-  getAllReports: () => metricRequest('/reports', {
+  getAllReports: () => metricRequest('/metric/reports', {
     method: 'GET',
   }),
 
   // 创建报表
-  createReport: (data) => metricRequest('/reports', {
+  createReport: (data) => metricRequest('/metric/reports', {
     method: 'POST',
     body: JSON.stringify(data),
   }),
 
   // 根据患者姓名查询报表
-  getReportsByPatientName: (patientName) => metricRequest(`/reports/patient/${encodeURIComponent(patientName)}`, {
+  getReportsByPatientName: (patientName) => metricRequest(`/metric/reports/patient/${encodeURIComponent(patientName)}`, {
     method: 'GET',
+  }),
+
+  // ==================== AI Agent API ====================
+  // 医疗影像分析与报表生成
+  analyzeAndReport: (userInput) => metricRequest('/metric/ai/analyze-and-report', {
+    method: 'POST',
+    body: userInput,
   }),
 }

@@ -31,18 +31,11 @@ fun Application.configureSecurity() {
                     .build()
             }
 
-            // 验证函数：检查令牌的 audience 是否匹配
+            // 验证函数：不需要重复验证audience，因为在verifier中已经验证过了
             validate { credential ->
                 this@configureSecurity.environment.log.info("验证JWT令牌: subject=${credential.payload.subject}")
-                val aud = credential.payload.audience
-                this@configureSecurity.environment.log.info("令牌audience: $aud, 配置audience: $audience")
-                if (aud.contains(audience)) {
-                    this@configureSecurity.environment.log.info("JWT验证通过")
-                    JWTPrincipal(credential.payload)
-                } else {
-                    this@configureSecurity.environment.log.warn("JWT验证失败: audience不匹配")
-                    null
-                }
+                this@configureSecurity.environment.log.info("JWT验证通过")
+                JWTPrincipal(credential.payload)
             }
 
             // 令牌过期时拒绝

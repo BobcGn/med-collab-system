@@ -120,6 +120,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { metricApi } from '../utils/api'
 
 const router = useRouter()
 const route = useRoute()
@@ -175,43 +176,57 @@ const handleImageUpload = (event) => {
 }
 
 /**
- * 模拟AI分析
+ * 调用AI分析
  * @param {string} imageUrl - 图片URL
  * @param {string} type - 影像类型
  */
-const analyzeImage = (imageUrl, type) => {
+const analyzeImage = async (imageUrl, type) => {
   loading.value = true
   
-  // 模拟API调用延迟
-  setTimeout(() => {
-    loading.value = false
-    
-    // 模拟AI分析结果
-    const aiResults = {
-      'X-RAY': '胸部X射线检查显示双肺纹理清晰，未见明显异常阴影。心脏大小正常，纵隔无增宽。肋骨结构完整。',
-      'CT': '胸部CT扫描显示双肺野清晰，未见明显结节或肿块。纵隔内未见明显肿大淋巴结。胸腔内无积液。',
-      'MRI': '头部MRI检查显示脑实质未见明显异常信号。脑室系统大小正常，脑沟裂无增宽。颅骨结构完整。',
-      'ULTRASOUND': '腹部超声检查显示肝脏大小正常，回声均匀。胆囊无肿大，壁不厚。胰腺、脾脏大小正常。双肾结构清晰，无明显异常。',
-      'OTHER': '医学影像检查显示未见明显异常。'
+  try {
+    // 准备请求数据
+    const requestData = {
+      imageUrl: imageUrl,
+      imageType: type,
+      patientId: patientId.value,
+      patientName: patientName.value
     }
+    
+    // 调用后端API
+    const response = await metricApi.analyzeAndReport(JSON.stringify(requestData))
+    
+    loading.value = false
     
     // 添加AI分析结果
     messages.value.push({
       role: 'ai-message',
       type: 'ai_result',
-      content: aiResults[type] || '医学影像检查显示未见明显异常。',
+      content: response.result || '医学影像检查显示未见明显异常。',
       confidence: Math.floor(Math.random() * 10) + 90 // 90-99% 置信度
     })
     
     // 滚动到底部
     scrollToBottom()
-  }, 2000)
+  } catch (error) {
+    loading.value = false
+    console.error('AI分析失败:', error)
+    
+    // 添加错误消息
+    messages.value.push({
+      role: 'system-message',
+      type: 'text',
+      content: 'AI分析失败，请稍后重试'
+    })
+    
+    // 滚动到底部
+    scrollToBottom()
+  }
 }
 
 /**
  * 发送消息
  */
-const sendMessage = () => {
+const sendMessage = async () => {
   if (isEmptyInput.value) return
   
   // 添加医生消息
@@ -227,24 +242,45 @@ const sendMessage = () => {
   // 滚动到底部
   scrollToBottom()
   
-  // 模拟AI回复
-  setTimeout(() => {
+  // 调用AI回复
+  try {
     loading.value = true
     
-    setTimeout(() => {
-      loading.value = false
-      
-      // 模拟AI回复
-      messages.value.push({
-        role: 'ai-message',
-        type: 'text',
-        content: '收到您的消息，我会为您提供专业的医学影像分析服务。'
-      })
-      
-      // 滚动到底部
-      scrollToBottom()
-    }, 1000)
-  }, 500)
+    // 准备请求数据
+    const requestData = {
+      message: inputMessage.value,
+      patientId: patientId.value,
+      patientName: patientName.value
+    }
+    
+    // 调用后端API
+    const response = await metricApi.analyzeAndReport(JSON.stringify(requestData))
+    
+    loading.value = false
+    
+    // 添加AI回复
+    messages.value.push({
+      role: 'ai-message',
+      type: 'text',
+      content: response.result || '收到您的消息，我会为您提供专业的医学影像分析服务。'
+    })
+    
+    // 滚动到底部
+    scrollToBottom()
+  } catch (error) {
+    loading.value = false
+    console.error('AI回复失败:', error)
+    
+    // 添加错误消息
+    messages.value.push({
+      role: 'system-message',
+      type: 'text',
+      content: 'AI回复失败，请稍后重试'
+    })
+    
+    // 滚动到底部
+    scrollToBottom()
+  }
 }
 
 /**

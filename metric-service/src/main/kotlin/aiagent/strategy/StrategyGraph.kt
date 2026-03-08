@@ -1,12 +1,13 @@
-package database.aiagent.strategy
+package aiagent.strategy
 
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.tools.ToolRegistry
-import database.aiagent.tools.MedicalImageAnalyzerTool
-import database.aiagent.tools.ReportGenerateTool
+import aiagent.tools.MedicalImageAnalyzerTool
+import aiagent.tools.ReportGenerateTool
 import enums.ImageType
 import org.jetbrains.exposed.sql.transactions.transaction
+import java.time.LocalDateTime
 
 /**
  * 辅助函数：解析输入参数
@@ -66,7 +67,7 @@ val metricReportStrategy = strategy<String, String>("医疗影像分析与报表
                 "hospitalId" to inputData["hospitalId"] as String,
                 "patientId" to inputData["patientId"] as String,
                 "patientName" to inputData["patientName"] as String,
-                "uploadTime" to java.time.LocalDateTime.now().toString()
+                "uploadTime" to LocalDateTime.now().toString()
             )
             
             imageData
@@ -83,7 +84,7 @@ val metricReportStrategy = strategy<String, String>("医疗影像分析与报表
             }
             
             // 添加验证结果
-            input + mapOf("validated" to true, "validationTime" to java.time.LocalDateTime.now().toString())
+            input + mapOf("validated" to true, "validationTime" to LocalDateTime.now().toString())
         }
 
         // 定义边

@@ -1,4 +1,4 @@
-package database.aiagent.tools
+package aiagent.tools
 
 import ai.koog.agents.core.tools.Tool
 import ai.koog.agents.core.tools.annotations.LLMDescription
@@ -6,6 +6,7 @@ import ai.koog.agents.core.tools.annotations.LLMDescription
 import enums.ImageType
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
+import java.time.LocalDateTime
 
 /**
  * 医疗图像分析工具
@@ -54,7 +55,7 @@ object MedicalImageAnalyzerTool: Tool<MedicalImageAnalyzerTool.Args, String>() {
                 "hospitalId": "${args.hospitalId}",
                 "patientId": "${args.patientId}",
                 "patientName": "${args.patientName}",
-                "analysisTime": "${java.time.LocalDateTime.now()}",
+                "analysisTime": "${LocalDateTime.now()}",
                 "findings": [
                     {
                         "region": "胸部",
