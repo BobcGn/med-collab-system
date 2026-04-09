@@ -1,5 +1,8 @@
+import { getGatewayOrigin } from './runtimeConfig'
+
 // API 基础配置
-const API_BASE_URL = 'http://localhost:8088/api/auth'
+const GATEWAY_ORIGIN = getGatewayOrigin()
+const API_BASE_URL = `${GATEWAY_ORIGIN}/api/auth`
 
 // 请求拦截器
 const request = async (url, options = {}) => {
@@ -301,7 +304,7 @@ export const authApi = {
 }
 
 // 患者服务 API 配置（通过网关访问）
-const PATIENT_API_BASE_URL = 'http://localhost:8088'
+const PATIENT_API_BASE_URL = GATEWAY_ORIGIN
 
 const patientRequest = async (url, options = {}) => {
   const token = localStorage.getItem('token')
@@ -467,7 +470,7 @@ const patientRequest = async (url, options = {}) => {
 }
 
 // Metric服务 API 配置（通过网关访问）
-const METRIC_API_BASE_URL = 'http://localhost:8088'
+const METRIC_API_BASE_URL = GATEWAY_ORIGIN
 
 const metricRequest = async (url, options = {}) => {
   const token = localStorage.getItem('token')

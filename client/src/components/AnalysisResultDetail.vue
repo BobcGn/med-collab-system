@@ -29,7 +29,7 @@
           </div>
           <div class="profile-item">
             <span class="label">年龄:</span>
-            <span class="value">{{ patientAge }}岁</span>
+            <span class="value">{{ patientAge === '-' ? '-' : `${patientAge}岁` }}</span>
           </div>
           <div class="profile-item">
             <span class="label">血型:</span>
@@ -70,6 +70,11 @@
         </div>
 
         <div v-if="loading" class="loading">加载中...</div>
+        <div v-else-if="error" class="empty-state">
+          <div class="empty-content">
+            <p>{{ error }}</p>
+          </div>
+        </div>
         <div v-else-if="filteredResults.length === 0" class="empty-state">
           <div class="empty-content">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
@@ -81,9 +86,9 @@
           </div>
         </div>
         <div v-else class="result-cards">
-          <div v-for="result in filteredResults" :key="result.id" class="result-card">
+          <div v-for="result in paginatedResults" :key="result.id" class="result-card">
             <div class="card-header">
-              <h4>{{ result.analysisType }}分析</h4>
+              <h4>{{ result.analysisType }}</h4>
               <span class="analysis-date">{{ formatDate(result.analysisDate) }}</span>
             </div>
             <div class="card-content">
@@ -93,16 +98,12 @@
               </div>
               <div class="confidence-score">
                 <span class="label">置信度:</span>
-                <span class="value">{{ result.confidence }}%</span>
+                <span class="value">{{ formatConfidence(result.confidence) }}</span>
               </div>
               <div class="doctor-diagnosis" v-if="result.doctorDiagnosis">
                 <h5>医生诊断</h5>
                 <p>{{ result.doctorDiagnosis }}</p>
               </div>
-            </div>
-            <div class="card-actions">
-              <button @click="viewDetails(result)" class="btn-secondary">查看详情</button>
-              <button @click="exportResult(result)" class="btn-primary">导出结果</button>
             </div>
           </div>
         </div>
@@ -134,6 +135,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { metricApi, patientApi } from '../utils/api.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -142,17 +144,17 @@ const route = useRoute()
 const patientId = ref(route.query.patientId || '')
 const patientName = ref(route.query.patientName || '未知患者')
 
-// 患者详细信息（硬编码模拟数据）
-const patientGender = ref('男')
-const patientAge = ref(45)
-const patientBloodType = ref('A型')
-const patientDoctor = ref('王医生')
-const patientStatus = ref('Active')
-const patientStatusText = ref('激活')
+const patientGender = ref('-')
+const patientAge = ref('-')
+const patientBloodType = ref('-')
+const patientDoctor = ref('-')
+const patientStatus = ref('')
+const patientStatusText = ref('-')
 
 // 分析结果相关状态
 const analysisResults = ref([])
 const loading = ref(false)
+const error = ref('')
 const analysisTypeFilter = ref('')
 const searchKeyword = ref('')
 const currentPage = ref(0)
@@ -190,63 +192,166 @@ const paginatedResults = computed(() => {
   return filteredResults.value.slice(start, end)
 })
 
+const calculateAge = (birthDate) => {
+  if (!birthDate) {
+    return '-'
+  }
+
+  const today = new Date()
+  const birth = new Date(birthDate)
+  if (Number.isNaN(birth.getTime())) {
+    return '-'
+  }
+
+  let age = today.getFullYear() - birth.getFullYear()
+  const monthDiff = today.getMonth() - birth.getMonth()
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age -= 1
+  }
+  return age >= 0 ? age : '-'
+}
+
+const formatPatientStatusText = (status) => {
+  const statusMap = {
+    Active: '激活',
+    Discharged: '出院',
+    Deceased: '死亡',
+  }
+  return statusMap[status] || status || '-'
+}
+
+const formatGender = (gender) => {
+  const genderMap = {
+    M: '男',
+    F: '女',
+  }
+  return genderMap[gender] || gender || '-'
+}
+
+const formatMetricLabel = (key) => {
+  const labelMap = {
+    density: '密度',
+    size: '大小',
+    location: '位置',
+    severity: '严重程度',
+    signalIntensity: '信号强度',
+    tissueCharacteristics: '组织特征',
+    opacity: '不透光度',
+    boneStructure: '骨骼结构',
+    echogenicity: '回声性',
+    bloodFlow: '血流',
+    name: '指标',
+    value: '值',
+    unit: '单位',
+    referenceRange: '参考范围',
+  }
+  return labelMap[key] || key
+}
+
+const summarizeMetrics = (metrics) => {
+  if (!metrics) {
+    return ''
+  }
+
+  if (typeof metrics === 'string') {
+    return metrics
+  }
+
+  const metricItems = Array.isArray(metrics.metrics) ? metrics.metrics : [metrics]
+  return metricItems
+    .map((metric) => {
+      if (!metric || typeof metric !== 'object') {
+        return ''
+      }
+
+      return Object.entries(metric)
+        .filter(([key, value]) => key !== 'confidence' && value != null && value !== '')
+        .map(([key, value]) => `${formatMetricLabel(key)}: ${value}`)
+        .join('，')
+    })
+    .filter(Boolean)
+    .join('；')
+}
+
+const extractConfidence = (metrics) => {
+  if (!metrics || typeof metrics !== 'object') {
+    return null
+  }
+
+  if (typeof metrics.confidence === 'number' && !Number.isNaN(metrics.confidence)) {
+    return Math.round(metrics.confidence)
+  }
+
+  if (Array.isArray(metrics.metrics)) {
+    const confidenceValues = metrics.metrics
+      .map((item) => item?.confidence)
+      .filter((value) => typeof value === 'number' && !Number.isNaN(value))
+
+    if (confidenceValues.length > 0) {
+      const average = confidenceValues.reduce((sum, value) => sum + value, 0) / confidenceValues.length
+      return Math.round(average)
+    }
+  }
+
+  return null
+}
+
+const inferAnalysisType = (result) => {
+  return result.imageType
+    || result.metrics?.imageType
+    || result.metrics?.type
+    || '影像分析'
+}
+
+const normalizeAnalysisResult = (result) => {
+  return {
+    id: result.id,
+    analysisType: inferAnalysisType(result),
+    analysisDate: result.completedAt || result.createdAt,
+    result: result.summary || summarizeMetrics(result.metrics) || result.errorMessage || '暂无分析摘要',
+    confidence: extractConfidence(result.metrics),
+    doctorDiagnosis: result.errorMessage || '',
+  }
+}
+
+const formatConfidence = (value) => {
+  return value == null ? '-' : `${value}%`
+}
+
+const loadPatientProfile = async () => {
+  if (!patientId.value) {
+    return
+  }
+
+  try {
+    const patient = await patientApi.getPatient(patientId.value)
+    patientName.value = patient?.name || patientName.value
+    patientGender.value = formatGender(patient?.gender)
+    patientAge.value = calculateAge(patient?.birthDate)
+    patientBloodType.value = patient?.bloodType || '-'
+    patientDoctor.value = patient?.attendingDoctorName || patient?.attendingDoctorId || '-'
+    patientStatus.value = patient?.status || ''
+    patientStatusText.value = formatPatientStatusText(patient?.status)
+  } catch (err) {
+    console.error('加载患者详情失败:', err)
+  }
+}
+
 /**
  * 加载患者分析结果
  */
 const loadAnalysisResults = async () => {
   loading.value = true
-  
+  error.value = ''
+
   try {
-    // 模拟API调用
-    // const result = await metricApi.getAnalysisResultsByPatientId(patientId.value)
-    // analysisResults.value = result
-    
-    // 硬编码模拟数据
-    analysisResults.value = [
-      {
-        id: 1,
-        analysisType: 'X-RAY',
-        analysisDate: '2024-01-15',
-        result: '胸部X射线检查显示双肺纹理清晰，未见明显异常阴影。心脏大小正常，纵隔无增宽。肋骨结构完整。',
-        confidence: 95,
-        doctorDiagnosis: '未见明显异常，建议定期复查。'
-      },
-      {
-        id: 2,
-        analysisType: 'CT',
-        analysisDate: '2024-01-10',
-        result: '胸部CT扫描显示双肺野清晰，未见明显结节或肿块。纵隔内未见明显肿大淋巴结。胸腔内无积液。',
-        confidence: 98,
-        doctorDiagnosis: '胸部CT检查未见明显异常。'
-      },
-      {
-        id: 3,
-        analysisType: 'MRI',
-        analysisDate: '2024-01-05',
-        result: '头部MRI检查显示脑实质未见明显异常信号。脑室系统大小正常，脑沟裂无增宽。颅骨结构完整。',
-        confidence: 96,
-        doctorDiagnosis: '头部MRI检查未见明显异常。'
-      },
-      {
-        id: 4,
-        analysisType: 'ULTRASOUND',
-        analysisDate: '2023-12-20',
-        result: '腹部超声检查显示肝脏大小正常，回声均匀。胆囊无肿大，壁不厚。胰腺、脾脏大小正常。双肾结构清晰，无明显异常。',
-        confidence: 94,
-        doctorDiagnosis: '腹部超声检查未见明显异常。'
-      },
-      {
-        id: 5,
-        analysisType: 'X-RAY',
-        analysisDate: '2023-12-10',
-        result: '胸部X射线检查显示双肺纹理清晰，未见明显异常阴影。心脏大小正常，纵隔无增宽。肋骨结构完整。',
-        confidence: 93,
-        doctorDiagnosis: '未见明显异常。'
-      }
-    ]
+    const response = await metricApi.getAnalysisResultsByPatientName(patientName.value)
+    const results = Array.isArray(response) ? response : response?.results || []
+    analysisResults.value = results.map(normalizeAnalysisResult)
   } catch (error) {
     console.error('加载分析结果失败:', error)
-    alert('加载分析结果失败，请重试')
+    analysisResults.value = []
+    error.value = error.message || '加载分析结果失败，请重试'
   } finally {
     loading.value = false
   }
@@ -265,24 +370,6 @@ const filterResults = () => {
  */
 const changePage = (newPage) => {
   currentPage.value = newPage
-}
-
-/**
- * 查看详情
- * @param {Object} result - 分析结果对象
- */
-const viewDetails = (result) => {
-  // 这里可以打开详情模态框或跳转到详情页面
-  alert(`查看${result.analysisType}分析详情`)
-}
-
-/**
- * 导出结果
- * @param {Object} result - 分析结果对象
- */
-const exportResult = (result) => {
-  // 模拟导出功能
-  alert(`导出${result.analysisType}分析结果`)
 }
 
 /**
@@ -305,6 +392,7 @@ const formatDate = (dateString) => {
 
 // 组件挂载时加载数据
 onMounted(() => {
+  loadPatientProfile()
   loadAnalysisResults()
 })
 </script>

@@ -1,240 +1,508 @@
 package com.example
 
 import ai.koog.ktor.aiAgent
-import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.deepseek.DeepSeekModels
-import io.ktor.server.auth.*
+import aiagent.strategy.metricReportStrategy
+import aiagent.validation.MetricAiConversationScope
+import aiagent.validation.buildUnsupportedMetricAiPrompt
+import aiagent.validation.determineMetricAiConversationScope
 import com.example.database.repository.AnalysisRepository
 import com.example.database.repository.MedicalImageRepository
 import com.example.database.repository.ReportRepository
 import com.example.service.MetricService
-import aiagent.strategy.metricReportStrategy
 import dto.AnalysisResultDto
 import dto.MedicalImageDto
+import dto.MetricAiSocketEnvelope
+import dto.MetricAiSocketRequest
 import dto.ReportDto
+import dto.SocketUserContext
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.server.websocket.*
+import io.ktor.websocket.*
+import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.transactions.transaction
-import kotlin.collections.mapOf
+import java.time.LocalDateTime
+import utils.JwtUtil
 
-fun Application.configureRouting() {
-    // 创建Repository和Service实例
+private val socketJson = Json { ignoreUnknownKeys = true }
+
+internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
     val analysisRepository = AnalysisRepository()
     val medicalImageRepository = MedicalImageRepository()
     val reportRepository = ReportRepository()
     val metricService = MetricService(analysisRepository, medicalImageRepository, reportRepository)
+    val jwtUtil = JwtUtil(environment.config)
 
-    // 路由配置
     routing {
-        // 健康检查
         get("/health") {
             try {
-                // 测试数据库连接
-                val result = transaction {
+                transaction {
                     exec("SELECT 1") {
                         it.next()
                         it.getInt(1)
                     }
                 }
-                call.respond(HttpStatusCode.OK, mapOf(
-                    "status" to "ok",
-                    "service" to "metric-service",
-                    "database" to "connected"
-                ))
+                call.respond(
+                    HttpStatusCode.OK,
+                    mapOf(
+                        "status" to "ok",
+                        "service" to "metric-service",
+                        "database" to "connected",
+                    )
+                )
             } catch (e: Exception) {
                 application.log.error("健康检查失败", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf(
-                    "status" to "error",
-                    "service" to "metric-service",
-                    "database" to "disconnected",
-                    "error" to e.message
-                ))
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    mapOf(
+                        "status" to "error",
+                        "service" to "metric-service",
+                        "database" to "disconnected",
+                        "error" to e.message,
+                    )
+                )
             }
         }
 
-        // ==================== 医学影像 API ====================
         route("/images") {
-            // 获取所有医学影像
-            get { 
+            get {
                 try {
                     val images = metricService.getAllMedicalImages()
                     call.respond(HttpStatusCode.OK, images)
                 } catch (e: Exception) {
                     application.log.error("获取医学影像失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
 
-            // 创建医学影像
-            post { 
+            post {
                 try {
                     val image = call.receive<MedicalImageDto.MedicalImageCreate>()
                     val result = metricService.createMedicalImage(image)
-                    call.respond(HttpStatusCode.Created, mapOf<String, Any>(
-                        "id" to result
-                    ))
+                    call.respond(HttpStatusCode.Created, mapOf<String, Any>("id" to result))
                 } catch (e: Exception) {
                     application.log.error("创建医学影像失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
 
-            // 根据患者姓名查询医学影像
-            get("/patient/{name}") { 
+            get("/patient/{name}") {
                 try {
                     val patientName = call.parameters["name"] ?: throw IllegalArgumentException("患者姓名不能为空")
                     val images = metricService.getMedicalImagesByPatientName(patientName)
                     call.respond(HttpStatusCode.OK, images)
                 } catch (e: Exception) {
                     application.log.error("查询医学影像失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
 
-            // 删除医学影像
-            delete("/{id}") { 
+            delete("/{id}") {
                 try {
                     val id = call.parameters["id"] ?: throw IllegalArgumentException("影像ID不能为空")
                     val result = metricService.deleteMedicalImage(id)
-                    call.respond(HttpStatusCode.OK, mapOf(
-                        "success" to result
-                    ))
+                    call.respond(HttpStatusCode.OK, mapOf("success" to result))
                 } catch (e: Exception) {
                     application.log.error("删除医学影像失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
         }
 
-        // ==================== 分析结果 API ====================
         route("/analyses") {
-            // 获取所有分析结果
-            get { 
+            get {
                 try {
                     val results = metricService.getAllAnalysisResults()
                     call.respond(HttpStatusCode.OK, results)
                 } catch (e: Exception) {
                     application.log.error("获取分析结果失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
 
-            // 创建分析结果
-            post { 
+            post {
                 try {
                     val result = call.receive<AnalysisResultDto.AnalysisResultComplete>()
                     val createdResult = metricService.createAnalysisResult(result)
-                    call.respond(HttpStatusCode.Created, mapOf<String, Any>(
-                        "id" to createdResult
-                    ))
+                    call.respond(HttpStatusCode.Created, mapOf<String, Any>("id" to createdResult))
                 } catch (e: Exception) {
                     application.log.error("创建分析结果失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
 
-            // 根据患者姓名查询分析结果
-            get("/patient/{name}") { 
+            get("/patient/{name}") {
                 try {
                     val patientName = call.parameters["name"] ?: throw IllegalArgumentException("患者姓名不能为空")
                     val results = metricService.getAnalysisResultsByPatientName(patientName)
                     call.respond(HttpStatusCode.OK, results)
                 } catch (e: Exception) {
                     application.log.error("查询分析结果失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
         }
 
-        // ==================== 报表 API ====================
         route("/reports") {
-            // 获取所有报表
-            get { 
+            get {
                 try {
                     val reports = metricService.getAllReports()
                     call.respond(HttpStatusCode.OK, reports)
                 } catch (e: Exception) {
                     application.log.error("获取报表失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
 
-            // 创建报表
-            post { 
+            post {
                 try {
                     val report = call.receive<ReportDto.ReportCreate>()
                     val createdReport = metricService.createReport(report)
-                    call.respond(HttpStatusCode.Created, mapOf<String, Any>(
-                        "id" to createdReport
-                    ))
+                    call.respond(HttpStatusCode.Created, mapOf<String, Any>("id" to createdReport))
                 } catch (e: Exception) {
                     application.log.error("创建报表失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
 
-            // 根据患者姓名查询报表
-            get("/patient/{name}") { 
+            get("/patient/{name}") {
                 try {
                     val patientName = call.parameters["name"] ?: throw IllegalArgumentException("患者姓名不能为空")
                     val reports = metricService.getReportsByPatientName(patientName)
                     call.respond(HttpStatusCode.OK, reports)
                 } catch (e: Exception) {
                     application.log.error("查询报表失败", e)
-                    call.respond(HttpStatusCode.InternalServerError, mapOf(
-                        "error" to e.message
-                    ))
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
         }
 
-        // ==================== AI Agent API ====================
-        authenticate("jwt") {
-            route("/ai") {
-                // 医疗影像分析与报表生成
-                post("/analyze-and-report") {
-                    try {
-                        val userInput = call.receiveText()
-
-                        // 调用 AI Agent 进行分析
-                        val output = aiAgent(
-                            strategy = metricReportStrategy,
-                            model = DeepSeekModels.DeepSeekReasoner,
-                            input = userInput
-                        )
-
-                        call.respond(HttpStatusCode.OK, mapOf(
-                            "result" to output
-                        ))
-                    } catch (e: Exception) {
-                        application.log.error("AI 分析失败", e)
-                        call.respond(HttpStatusCode.InternalServerError, mapOf(
-                            "error" to (e.message ?: "未知错误")
-                        ))
-                    }
+        route("/ai") {
+            post("/analyze-and-report") {
+                val token = call.extractToken()
+                val socketUser = token?.let { buildSocketUser(jwtUtil, it) }
+                if (socketUser == null) {
+                    call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "未授权访问"))
+                    return@post
                 }
+
+                try {
+                    val request = socketJson.decodeFromString<MetricAiSocketRequest>(call.receiveText())
+                    val response = buildAiResponse(
+                        request = request,
+                        user = socketUser,
+                        deepSeekSettings = deepSeekSettings,
+                        onExecutionError = { error ->
+                            application.log.error("HTTP AI agent execution failed", error)
+                        },
+                        executeAgent = { input ->
+                            aiAgent(
+                                strategy = metricReportStrategy,
+                                model = DeepSeekModels.DeepSeekReasoner,
+                                input = input,
+                            )
+                        },
+                    )
+                    call.respond(
+                        HttpStatusCode.OK,
+                        mapOf(
+                            "result" to (response.analysisResult ?: response.message),
+                            "message" to response.message,
+                            "confidence" to response.confidence,
+                        )
+                    )
+                } catch (e: Exception) {
+                    application.log.error("AI 分析失败", e)
+                    call.respond(
+                        HttpStatusCode.InternalServerError,
+                        mapOf("error" to (e.message ?: "未知错误"))
+                    )
+                }
+            }
+        }
+
+        webSocket("/ws/ai-agent") {
+            val token = call.extractToken()
+            val socketUser = token?.let { buildSocketUser(jwtUtil, it) }
+            if (socketUser == null) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "invalid token"))
+                return@webSocket
+            }
+
+            sendSocketEnvelope(
+                MetricAiSocketEnvelope(
+                    type = "connected",
+                    message = "ai-agent websocket connected",
+                    createdAt = LocalDateTime.now().toString(),
+                    user = socketUser,
+                )
+            )
+
+            for (frame in incoming) {
+                if (frame !is Frame.Text) {
+                    continue
+                }
+
+                val rawText = frame.readText()
+                val request = try {
+                    socketJson.decodeFromString<MetricAiSocketRequest>(rawText)
+                } catch (_: Exception) {
+                    sendSocketEnvelope(
+                        MetricAiSocketEnvelope(
+                            type = "error",
+                            message = "invalid websocket payload",
+                            createdAt = LocalDateTime.now().toString(),
+                            user = socketUser,
+                        )
+                    )
+                    continue
+                }
+
+                sendSocketEnvelope(
+                    MetricAiSocketEnvelope(
+                        type = "processing",
+                        requestId = request.requestId,
+                        message = "ai-agent is processing your request",
+                        createdAt = LocalDateTime.now().toString(),
+                        user = socketUser,
+                    )
+                )
+
+                val response = try {
+                    buildAiResponse(
+                        request = request,
+                        user = socketUser,
+                        deepSeekSettings = deepSeekSettings,
+                        onExecutionError = { error ->
+                            application.log.error("WebSocket AI agent execution failed", error)
+                        },
+                        executeAgent = { input -> runMetricAiAgent(input) },
+                    )
+                } catch (e: Exception) {
+                    application.log.error("WebSocket AI 分析失败", e)
+                    MetricAiSocketEnvelope(
+                        type = "error",
+                        requestId = request.requestId,
+                        message = e.message ?: "AI 分析失败",
+                        createdAt = LocalDateTime.now().toString(),
+                        user = socketUser,
+                    )
+                }
+
+                sendSocketEnvelope(response)
             }
         }
     }
+}
+
+private fun ApplicationCall.extractToken(): String? {
+    val queryToken = request.queryParameters["token"]?.trim()
+    if (!queryToken.isNullOrBlank()) {
+        return queryToken
+    }
+
+    return request.headers[HttpHeaders.Authorization]
+        ?.removePrefix("Bearer ")
+        ?.trim()
+        ?.takeUnless { it.isBlank() }
+}
+
+private fun buildSocketUser(
+    jwtUtil: JwtUtil,
+    token: String,
+): SocketUserContext? {
+    if (!jwtUtil.validateToken(token)) {
+        return null
+    }
+
+    val userId = jwtUtil.getUserIdFromToken(token) ?: return null
+    val username = jwtUtil.getUsernameFromToken(token)
+    return SocketUserContext(
+        userId = userId,
+        username = username,
+        displayName = username ?: userId,
+        role = jwtUtil.getClaimFromToken(token, "role", String::class.java),
+    )
+}
+
+private suspend fun buildAiResponse(
+    request: MetricAiSocketRequest,
+    user: SocketUserContext,
+    deepSeekSettings: DeepSeekSettings,
+    onExecutionError: (Throwable) -> Unit = {},
+    executeAgent: suspend (String) -> String,
+): MetricAiSocketEnvelope {
+    val normalizedRequest = request.normalizeFor(user)
+    val hasImage = !normalizedRequest.imageData.isNullOrBlank()
+    val hasMessage = !normalizedRequest.message.isNullOrBlank()
+
+    require(hasImage || hasMessage) { "消息与图片不能同时为空" }
+
+    val createdAt = LocalDateTime.now().toString()
+    when (determineMetricAiConversationScope(normalizedRequest.message, hasImage)) {
+        MetricAiConversationScope.UNSUPPORTED -> {
+            return MetricAiSocketEnvelope(
+                type = "ai_response",
+                requestId = normalizedRequest.requestId,
+                message = buildUnsupportedMetricAiPrompt(),
+                createdAt = createdAt,
+                user = user,
+            )
+        }
+
+        MetricAiConversationScope.METRIC_DISCUSSION -> {
+            return MetricAiSocketEnvelope(
+                type = "ai_response",
+                requestId = normalizedRequest.requestId,
+                message = buildTextReply(normalizedRequest),
+                createdAt = createdAt,
+                user = user,
+            )
+        }
+
+        MetricAiConversationScope.IMAGE_ANALYSIS -> Unit
+    }
+
+    if (!deepSeekSettings.isConfigured) {
+        return buildUnavailableAiResponse(
+            request = normalizedRequest,
+            user = user,
+            createdAt = createdAt,
+            reason = deepSeekSettings.unavailableReason(),
+        )
+    }
+
+    val agentInput = normalizedRequest.toAgentInput()
+    val executionResult = runCatching {
+        executeAgent(agentInput)
+    }
+
+    return executionResult.fold(
+        onSuccess = { analysisResult ->
+            MetricAiSocketEnvelope(
+                type = "ai_response",
+                requestId = normalizedRequest.requestId,
+                message = "影像分析完成",
+                analysisResult = analysisResult,
+                confidence = 95,
+                createdAt = createdAt,
+                user = user,
+            )
+        },
+        onFailure = { error ->
+            onExecutionError(error)
+            MetricAiSocketEnvelope(
+                type = "ai_response",
+                requestId = normalizedRequest.requestId,
+                message = "AI 分析失败，已返回基础结果",
+                analysisResult = buildImageFallbackResponse(normalizedRequest, error),
+                confidence = 0,
+                createdAt = createdAt,
+                user = user,
+            )
+        },
+    )
+}
+
+private fun MetricAiSocketRequest.normalizeFor(_user: SocketUserContext): MetricAiSocketRequest {
+    val imageType = normalizeImageType(imageType)
+    return copy(
+        requestId = requestId ?: "req-${System.currentTimeMillis()}",
+        type = type.trim().ifBlank { "chat" },
+        message = message?.trim(),
+        imageData = imageData?.trim(),
+        imageType = imageType,
+        patientId = patientId?.trim().takeUnless { it.isNullOrBlank() } ?: "unknown-patient",
+        patientName = patientName?.trim().takeUnless { it.isNullOrBlank() } ?: "未知患者",
+        hospitalId = hospitalId?.trim().takeUnless { it.isNullOrBlank() } ?: "unknown-hospital",
+    )
+}
+
+private fun normalizeImageType(rawType: String?): String {
+    return when (rawType?.trim()?.uppercase()?.replace("-", "")?.replace("_", "")) {
+        "XRAY" -> "XRAY"
+        "CT" -> "CT"
+        "MRI" -> "MRI"
+        "ULTRASOUND" -> "ULTRASOUND"
+        "PATHOLOGY" -> "PATHOLOGY"
+        else -> "OTHER"
+    }
+}
+
+private fun MetricAiSocketRequest.toAgentInput(): String {
+    return toAgentInput(socketJson)
+}
+
+private fun buildTextReply(request: MetricAiSocketRequest): String {
+    val patientLabel = request.patientName ?: request.patientId ?: "当前患者"
+    return buildString {
+        append("已收到关于")
+        append(patientLabel)
+        append("的医疗影像/指标分析问题")
+        if (!request.message.isNullOrBlank()) {
+            append("：")
+            append(request.message)
+        }
+        append("。当前可继续围绕影像所见、测量指标和报告内容交流；如需正式分析结果和报表，请继续上传医学影像。")
+    }
+}
+
+private fun buildImageFallbackResponse(
+    request: MetricAiSocketRequest,
+    error: Throwable,
+): String {
+    return buildString {
+        appendLine("影像分析结果")
+        appendLine("患者: ${request.patientName} (${request.patientId})")
+        appendLine("影像类型: ${request.imageType}")
+        if (!request.message.isNullOrBlank()) {
+            appendLine("补充说明: ${request.message}")
+        }
+        appendLine("AI 分析未成功完成，已返回基础结果。")
+        append("建议: 请结合临床表现与原始影像进一步复核。")
+        error.message?.takeIf { it.isNotBlank() }?.let {
+            append(" 详细原因: ")
+            append(it)
+        }
+    }
+}
+
+private fun buildUnavailableAiResponse(
+    request: MetricAiSocketRequest,
+    user: SocketUserContext,
+    createdAt: String,
+    reason: String,
+): MetricAiSocketEnvelope {
+    return MetricAiSocketEnvelope(
+        type = "ai_response",
+        requestId = request.requestId,
+        message = "AI 服务未配置，已返回基础结果",
+        analysisResult = buildImageFallbackResponse(
+            request = request,
+            error = IllegalStateException(reason),
+        ),
+        confidence = 0,
+        createdAt = createdAt,
+        user = user,
+    )
+}
+
+private suspend fun DefaultWebSocketServerSession.sendSocketEnvelope(
+    envelope: MetricAiSocketEnvelope,
+) {
+    send(Frame.Text(socketJson.encodeToString(envelope)))
+}
+
+private suspend fun DefaultWebSocketServerSession.runMetricAiAgent(input: String): String {
+    val routingCall = call as? RoutingCall
+        ?: throw IllegalStateException("WebSocket call is not a RoutingCall")
+    return RoutingContext(routingCall).aiAgent(
+        strategy = metricReportStrategy,
+        model = DeepSeekModels.DeepSeekReasoner,
+        input = input,
+    )
 }

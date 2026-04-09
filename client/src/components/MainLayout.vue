@@ -216,6 +216,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { authStore } from '../utils/auth.js'
+import { getUnreadNotificationCount, systemNotificationEvents } from '../utils/systemNotifications.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -227,7 +228,7 @@ const patientManagementExpanded = ref(false)
 const metricManagementExpanded = ref(false)
 
 // 通知数量
-const notificationCount = ref(3)
+const notificationCount = ref(getUnreadNotificationCount())
 
 // 当前时间
 const currentTime = ref('')
@@ -320,15 +321,24 @@ const updateTime = () => {
   currentTime.value = `${year}-${month}-${day}  ${hours}:${minutes}:${seconds}`
 }
 
+const updateNotificationCount = () => {
+  notificationCount.value = getUnreadNotificationCount()
+}
+
 onMounted(() => {
+  updateNotificationCount()
   updateTime()
   timeInterval = setInterval(updateTime, 1000)
+  window.addEventListener(systemNotificationEvents.update, updateNotificationCount)
+  window.addEventListener('storage', updateNotificationCount)
 })
 
 onUnmounted(() => {
   if (timeInterval) {
     clearInterval(timeInterval)
   }
+  window.removeEventListener(systemNotificationEvents.update, updateNotificationCount)
+  window.removeEventListener('storage', updateNotificationCount)
 })
 </script>
 

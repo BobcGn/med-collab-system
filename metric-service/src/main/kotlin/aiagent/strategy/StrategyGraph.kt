@@ -6,6 +6,10 @@ import ai.koog.agents.core.tools.ToolRegistry
 import aiagent.tools.MedicalImageAnalyzerTool
 import aiagent.tools.ReportGenerateTool
 import enums.ImageType
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
 
@@ -13,29 +17,68 @@ import java.time.LocalDateTime
  * 辅助函数：解析输入参数
  */
 fun parseInput(input: String): Map<String, Any> {
-    // 简单的JSON解析模拟
-    // 实际项目中，应该使用标准的JSON解析库
     val inputMap = mutableMapOf<String, Any>()
-    
-    // 模拟解析逻辑
+    val jsonObject = runCatching {
+        Json.parseToJsonElement(input).jsonObject
+    }.getOrNull()
+
+    if (jsonObject != null) {
+        val imagePath = jsonObject["imagePath"]?.jsonPrimitive?.contentOrNull
+            ?: jsonObject["imageUrl"]?.jsonPrimitive?.contentOrNull
+        val imageType = jsonObject["imageType"]?.jsonPrimitive?.contentOrNull
+        val hospitalId = jsonObject["hospitalId"]?.jsonPrimitive?.contentOrNull
+        val patientId = jsonObject["patientId"]?.jsonPrimitive?.contentOrNull
+        val patientName = jsonObject["patientName"]?.jsonPrimitive?.contentOrNull
+        val message = jsonObject["message"]?.jsonPrimitive?.contentOrNull
+
+        imagePath?.takeIf { it.isNotBlank() }?.let { inputMap["imagePath"] = it }
+        imageType?.let { inputMap["imageType"] = normalizeImageType(it) }
+        hospitalId?.takeIf { it.isNotBlank() }?.let { inputMap["hospitalId"] = it }
+        patientId?.takeIf { it.isNotBlank() }?.let { inputMap["patientId"] = it }
+        patientName?.takeIf { it.isNotBlank() }?.let { inputMap["patientName"] = it }
+        message?.takeIf { it.isNotBlank() }?.let { inputMap["message"] = it }
+        return inputMap
+    }
+
     if (input.contains("imagePath")) {
-        inputMap["imagePath"] = input.substringAfter("imagePath:").substringBefore('"').trim()
+        input.substringAfter("imagePath:").substringBefore('"').trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { inputMap["imagePath"] = it }
     }
     if (input.contains("imageType")) {
         val typeStr = input.substringAfter("imageType:").substringBefore('"').trim()
-        inputMap["imageType"] = ImageType.valueOf(typeStr)
+        if (typeStr.isNotBlank()) {
+            inputMap["imageType"] = normalizeImageType(typeStr)
+        }
     }
     if (input.contains("hospitalId")) {
-        inputMap["hospitalId"] = input.substringAfter("hospitalId:").substringBefore('"').trim()
+        input.substringAfter("hospitalId:").substringBefore('"').trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { inputMap["hospitalId"] = it }
     }
     if (input.contains("patientId")) {
-        inputMap["patientId"] = input.substringAfter("patientId:").substringBefore('"').trim()
+        input.substringAfter("patientId:").substringBefore('"').trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { inputMap["patientId"] = it }
     }
     if (input.contains("patientName")) {
-        inputMap["patientName"] = input.substringAfter("patientName:").substringBefore('"').trim()
+        input.substringAfter("patientName:").substringBefore('"').trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { inputMap["patientName"] = it }
     }
-    
+
     return inputMap
+}
+
+private fun normalizeImageType(rawType: String): ImageType {
+    return when (rawType.trim().uppercase().replace("-", "").replace("_", "")) {
+        "XRAY" -> ImageType.XRAY
+        "CT" -> ImageType.CT
+        "MRI" -> ImageType.MRI
+        "ULTRASOUND" -> ImageType.ULTRASOUND
+        "PATHOLOGY" -> ImageType.PATHOLOGY
+        else -> ImageType.OTHER
+    }
 }
 
 /**

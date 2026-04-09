@@ -5,6 +5,10 @@ import com.example.database.repository.DepartmentRepository
 import com.example.database.repository.UserRepository
 import dto.DepartmentDto
 import dto.HospitalDto
+import dto.NotificationSocketCommand
+import dto.NotificationSocketEnvelope
+import dto.SocketUserContext
+import dto.SystemNotificationMessage
 import dto.UserDto
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -13,11 +17,17 @@ import io.ktor.server.auth.jwt.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import io.ktor.server.websocket.*
+import io.ktor.websocket.*
+import java.time.LocalDateTime
+import java.util.UUID
+import kotlinx.serialization.json.Json
 import utils.JwtUtil
 
 fun Application.configureRouting() {
     // 创建 JwtUtil 实例
     val jwtUtil = JwtUtil(environment.config)
+    val socketJson = Json { ignoreUnknownKeys = true }
 
     // 创建Repository实例
     val hospitalRepository = HospitalRepository()
@@ -33,6 +43,131 @@ fun Application.configureRouting() {
         // 健康检查
         get("/health") {
             call.respond(HttpStatusCode.OK, mapOf("status" to "ok"))
+        }
+
+        webSocket("/ws/notifications") {
+            val token = call.extractSocketToken()
+            if (token.isNullOrBlank() || !jwtUtil.validateToken(token)) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "invalid token"))
+                return@webSocket
+            }
+
+            val userId = jwtUtil.getUserIdFromToken(token)
+            if (userId.isNullOrBlank()) {
+                close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "invalid user"))
+                return@webSocket
+            }
+
+            val userInfo = runCatching { userService.getUserInfo(userId) }.getOrNull()
+            val role = userInfo?.role ?: jwtUtil.getClaimFromToken(token, "role", String::class.java)
+            val username = userInfo?.username ?: jwtUtil.getUsernameFromToken(token)
+            val socketUser = SocketUserContext(
+                userId = userId,
+                username = username,
+                displayName = userInfo?.fullName ?: username ?: userId,
+                role = role,
+            )
+
+            val connectionId = SystemNotificationHub.register(this, socketUser)
+            SystemNotificationHub.sendSnapshot(this, socketUser)
+
+            try {
+                for (frame in incoming) {
+                    if (frame !is Frame.Text) {
+                        continue
+                    }
+
+                    val commandText = frame.readText()
+                    val command = try {
+                        socketJson.decodeFromString<NotificationSocketCommand>(commandText)
+                    } catch (_: Exception) {
+                        send(
+                            Frame.Text(
+                                socketJson.encodeToString(
+                                    NotificationSocketEnvelope(
+                                        type = "error",
+                                        message = "invalid payload",
+                                    )
+                                )
+                            )
+                        )
+                        continue
+                    }
+
+                    when (command.type.lowercase()) {
+                        "ping" -> {
+                            send(
+                                Frame.Text(
+                                    socketJson.encodeToString(
+                                        NotificationSocketEnvelope(
+                                            type = "pong",
+                                            message = "ok",
+                                        )
+                                    )
+                                )
+                            )
+                        }
+
+                        "publish" -> {
+                            if (socketUser.role != "admin") {
+                                send(
+                                    Frame.Text(
+                                        socketJson.encodeToString(
+                                            NotificationSocketEnvelope(
+                                                type = "error",
+                                                message = "only admin can publish notifications",
+                                            )
+                                        )
+                                    )
+                                )
+                                continue
+                            }
+
+                            val title = command.title?.trim().orEmpty()
+                            val content = command.content?.trim().orEmpty()
+                            if (title.isBlank() || content.isBlank()) {
+                                send(
+                                    Frame.Text(
+                                        socketJson.encodeToString(
+                                            NotificationSocketEnvelope(
+                                                type = "error",
+                                                message = "title and content are required",
+                                            )
+                                        )
+                                    )
+                                )
+                                continue
+                            }
+
+                            val notification = SystemNotificationMessage(
+                                id = UUID.randomUUID().toString(),
+                                title = title,
+                                content = content,
+                                priority = command.priority?.trim()?.lowercase().takeUnless { it.isNullOrBlank() } ?: "normal",
+                                createdAt = LocalDateTime.now().toString(),
+                                senderId = socketUser.userId,
+                                senderName = socketUser.displayName ?: socketUser.username ?: socketUser.userId,
+                            )
+                            SystemNotificationHub.publish(notification)
+                        }
+
+                        else -> {
+                            send(
+                                Frame.Text(
+                                    socketJson.encodeToString(
+                                        NotificationSocketEnvelope(
+                                            type = "error",
+                                            message = "unsupported command type",
+                                        )
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
+            } finally {
+                SystemNotificationHub.unregister(connectionId)
+            }
         }
         
         // 公开路由 - 不需要认证（网关已经处理了/api/auth前缀，这里直接使用路径）
@@ -349,4 +484,11 @@ fun Application.configureRouting() {
                 }
             }
     }
+}
+
+private fun ApplicationCall.extractSocketToken(): String? {
+    val bearerToken = request.headers[HttpHeaders.Authorization]
+        ?.removePrefix("Bearer ")
+        ?.trim()
+    return request.queryParameters["token"]?.trim().takeUnless { it.isNullOrBlank() } ?: bearerToken
 }

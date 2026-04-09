@@ -17,7 +17,6 @@
     <div class="content-container">
       <!-- 操作按钮 -->
       <div class="action-buttons">
-        <button @click="generateNewReport" class="btn-primary">生成新报表</button>
         <button @click="refreshReports" class="btn-secondary">刷新列表</button>
       </div>
 
@@ -44,6 +43,11 @@
         </div>
 
         <div v-if="loading" class="loading">加载中...</div>
+        <div v-else-if="error" class="empty-state">
+          <div class="empty-content">
+            <p>{{ error }}</p>
+          </div>
+        </div>
         <div v-else-if="filteredReports.length === 0" class="empty-state">
           <div class="empty-content">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="empty-icon">
@@ -54,11 +58,10 @@
               <polyline points="10 9 9 9 8 9"></polyline>
             </svg>
             <p>暂无报表数据</p>
-            <button @click="generateNewReport" class="btn-primary">生成首个报表</button>
           </div>
         </div>
         <div v-else class="report-cards">
-          <div v-for="report in filteredReports" :key="report.id" class="report-card">
+          <div v-for="report in paginatedReports" :key="report.id" class="report-card">
             <div class="card-header">
               <div class="header-info">
                 <h4>{{ report.reportTitle }}</h4>
@@ -69,15 +72,12 @@
             <div class="card-content">
               <p class="report-summary">{{ report.reportContent.substring(0, 150) }}...</p>
               <div class="report-meta">
-                <span class="generated-by">生成人: {{ report.generatedBy }}</span>
                 <span class="report-status" :class="report.status">{{ report.statusText }}</span>
               </div>
             </div>
             <div class="card-actions">
-              <button @click="viewReport(report)" class="btn-secondary">查看</button>
-              <button @click="downloadReport(report)" class="btn-secondary">下载</button>
-              <button @click="printReport(report)" class="btn-secondary">打印</button>
-              <button @click="regenerateReport(report)" class="btn-primary">重新生成</button>
+              <button @click="viewReport(report)" class="btn-secondary" :disabled="!report.filePath">查看</button>
+              <button @click="downloadReport(report)" class="btn-secondary" :disabled="!report.filePath">下载</button>
             </div>
           </div>
         </div>
@@ -109,6 +109,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { metricApi } from '../utils/api.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -121,6 +122,7 @@ const generateReport = ref(route.query.generate === 'true')
 // 报表相关状态
 const reports = ref([])
 const loading = ref(false)
+const error = ref('')
 const reportTypeFilter = ref('')
 const searchKeyword = ref('')
 const currentPage = ref(0)
@@ -151,73 +153,63 @@ const totalPages = computed(() => {
   return Math.ceil(filteredReports.value.length / pageSize.value)
 })
 
+const paginatedReports = computed(() => {
+  const start = currentPage.value * pageSize.value
+  const end = start + pageSize.value
+  return filteredReports.value.slice(start, end)
+})
+
+const formatReportStatus = (status) => {
+  const statusMap = {
+    completed: '已完成',
+    generated: '已生成',
+    pending: '处理中',
+    failed: '失败',
+  }
+  return statusMap[status] || status || '未知状态'
+}
+
+const buildReportPreview = (report) => {
+  if (report.errorMessage) {
+    return `生成失败: ${report.errorMessage}`
+  }
+  if (report.filePath) {
+    return `报表文件: ${report.filePath}`
+  }
+  if (Array.isArray(report.analysisIds) && report.analysisIds.length > 0) {
+    return `已关联 ${report.analysisIds.length} 条分析结果`
+  }
+  return '暂无报表内容预览'
+}
+
+const normalizeReport = (report) => {
+  return {
+    id: report.id,
+    reportTitle: `${report.patientName || patientName.value} ${report.reportType || '报表'}`,
+    reportType: report.reportType || '未分类',
+    reportDate: report.generatedAt || report.createdAt,
+    reportContent: buildReportPreview(report),
+    status: report.status || 'unknown',
+    statusText: formatReportStatus(report.status),
+    filePath: report.filePath || '',
+  }
+}
+
 /**
  * 加载患者报表
  */
 const loadReports = async () => {
   loading.value = true
-  
+  error.value = ''
+
   try {
-    // 模拟API调用
-    // const result = await metricApi.getReportsByPatientId(patientId.value)
-    // reports.value = result
-    
-    // 硬编码模拟数据
-    reports.value = [
-      {
-        id: 1,
-        reportTitle: '胸部X射线分析报告',
-        reportType: '影像分析',
-        reportDate: '2024-01-15',
-        reportContent: '患者胸部X射线检查显示双肺纹理清晰，未见明显异常阴影。心脏大小正常，纵隔无增宽。肋骨结构完整。诊断意见：未见明显异常，建议定期复查。',
-        generatedBy: '王医生',
-        status: 'completed',
-        statusText: '已完成'
-      },
-      {
-        id: 2,
-        reportTitle: '头部MRI检查报告',
-        reportType: '影像分析',
-        reportDate: '2024-01-10',
-        reportContent: '患者头部MRI检查显示脑实质未见明显异常信号。脑室系统大小正常，脑沟裂无增宽。颅骨结构完整。诊断意见：头部MRI检查未见明显异常。',
-        generatedBy: '李医生',
-        status: 'completed',
-        statusText: '已完成'
-      },
-      {
-        id: 3,
-        reportTitle: '综合诊断报告',
-        reportType: '综合诊断',
-        reportDate: '2024-01-05',
-        reportContent: '患者经多项检查，未发现明显异常。建议保持健康生活方式，定期体检。',
-        generatedBy: '王医生',
-        status: 'completed',
-        statusText: '已完成'
-      },
-      {
-        id: 4,
-        reportTitle: '随访报告',
-        reportType: '随访报告',
-        reportDate: '2023-12-20',
-        reportContent: '患者随访情况良好，无不适症状。建议继续保持定期复查。',
-        generatedBy: '赵医生',
-        status: 'completed',
-        statusText: '已完成'
-      },
-      {
-        id: 5,
-        reportTitle: '腹部超声检查报告',
-        reportType: '影像分析',
-        reportDate: '2023-12-10',
-        reportContent: '患者腹部超声检查显示肝脏大小正常，回声均匀。胆囊无肿大，壁不厚。胰腺、脾脏大小正常。双肾结构清晰，无明显异常。诊断意见：腹部超声检查未见明显异常。',
-        generatedBy: '王医生',
-        status: 'completed',
-        statusText: '已完成'
-      }
-    ]
+    const response = await metricApi.getReportsByPatientName(patientName.value)
+    const resultList = Array.isArray(response) ? response : response?.reports || []
+    reports.value = resultList.map(normalizeReport)
   } catch (error) {
     console.error('加载报表失败:', error)
-    alert('加载报表失败，请重试')
+    reports.value = []
+    error.value = error.message || '加载报表失败，请重试'
   } finally {
     loading.value = false
   }
@@ -239,28 +231,6 @@ const changePage = (newPage) => {
 }
 
 /**
- * 生成新报表
- */
-const generateNewReport = () => {
-  // 模拟生成报表功能
-  alert('生成新报表')
-  
-  // 模拟添加新报表到列表
-  const newReport = {
-    id: reports.value.length + 1,
-    reportTitle: '新生成的报表',
-    reportType: '综合诊断',
-    reportDate: new Date().toISOString().split('T')[0],
-    reportContent: '这是一份新生成的报表内容...',
-    generatedBy: '当前医生',
-    status: 'completed',
-    statusText: '已完成'
-  }
-  
-  reports.value.unshift(newReport)
-}
-
-/**
  * 刷新报表列表
  */
 const refreshReports = () => {
@@ -272,8 +242,10 @@ const refreshReports = () => {
  * @param {Object} report - 报表对象
  */
 const viewReport = (report) => {
-  // 模拟查看报表功能
-  alert(`查看报表: ${report.reportTitle}`)
+  if (!report.filePath) {
+    return
+  }
+  window.open(report.filePath, '_blank', 'noopener,noreferrer')
 }
 
 /**
@@ -281,30 +253,10 @@ const viewReport = (report) => {
  * @param {Object} report - 报表对象
  */
 const downloadReport = (report) => {
-  // 模拟下载报表功能
-  alert(`下载报表: ${report.reportTitle}`)
-}
-
-/**
- * 打印报表
- * @param {Object} report - 报表对象
- */
-const printReport = (report) => {
-  // 模拟打印报表功能
-  alert(`打印报表: ${report.reportTitle}`)
-}
-
-/**
- * 重新生成报表
- * @param {Object} report - 报表对象
- */
-const regenerateReport = (report) => {
-  // 模拟重新生成报表功能
-  alert(`重新生成报表: ${report.reportTitle}`)
-  
-  // 模拟更新报表日期
-  report.reportDate = new Date().toISOString().split('T')[0]
-  report.generatedBy = '当前医生'
+  if (!report.filePath) {
+    return
+  }
+  window.open(report.filePath, '_blank', 'noopener,noreferrer')
 }
 
 /**
@@ -328,12 +280,8 @@ const formatDate = (dateString) => {
 // 组件挂载时加载数据
 onMounted(() => {
   loadReports()
-  
-  // 如果需要生成报表
   if (generateReport.value) {
-    setTimeout(() => {
-      generateNewReport()
-    }, 1000)
+    console.info('report generation flag detected, waiting for backend-generated reports')
   }
 })
 </script>

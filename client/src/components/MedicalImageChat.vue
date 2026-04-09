@@ -10,21 +10,19 @@
         <h2>医学影像分析 - {{ patientName }}</h2>
         <div class="patient-info">
           <span class="patient-id">患者ID: {{ patientId }}</span>
+          <span class="socket-status" :class="socketStatus">{{ socketStatusLabel }}</span>
         </div>
       </div>
     </div>
 
     <div class="chat-container">
-      <!-- 聊天消息区域 -->
       <div class="chat-messages" ref="chatMessages">
-        <!-- 系统消息 -->
         <div class="message system-message">
           <div class="message-content">
-            <p>欢迎使用医学影像AI分析系统，请上传医学影像进行分析</p>
+            <p>欢迎使用医学影像 AI 分析系统。AI Agent 仅支持医疗影像分析、指标解读与报表生成，不提供闲聊或其他通用问答。</p>
           </div>
         </div>
 
-        <!-- 医生消息 -->
         <div v-for="(message, index) in messages" :key="index" class="message" :class="message.role">
           <div class="message-content">
             <div v-if="message.type === 'text'" class="text-message">
@@ -40,10 +38,10 @@
             <div v-else-if="message.type === 'ai_result'" class="ai-result-message">
               <div class="ai-result-header">
                 <h4>AI分析结果</h4>
-                <span class="confidence">置信度: {{ message.confidence }}%</span>
+                <span class="confidence">置信度: {{ formatConfidence(message.confidence) }}</span>
               </div>
               <div class="ai-result-content">
-                <textarea v-model="message.content" class="result-textarea" placeholder="AI分析结果..."></textarea>
+                <textarea v-model="message.content" class="result-textarea" placeholder="AI分析结果..." />
               </div>
               <div class="ai-result-actions">
                 <button @click="confirmResult(message)" class="btn-primary">确认结果</button>
@@ -52,7 +50,6 @@
           </div>
         </div>
 
-        <!-- 加载动画 -->
         <div v-if="loading" class="message ai-message">
           <div class="message-content">
             <div class="loading-animation">
@@ -64,9 +61,7 @@
         </div>
       </div>
 
-      <!-- 输入区域 -->
       <div class="input-area">
-        <!-- 上传区域 -->
         <div class="upload-section">
           <label class="upload-button">
             <input type="file" accept="image/*" @change="handleImageUpload" multiple hidden />
@@ -78,7 +73,7 @@
             上传影像
           </label>
           <select v-model="imageType" class="image-type-select">
-            <option value="X-RAY">X射线</option>
+            <option value="XRAY">X射线</option>
             <option value="CT">CT</option>
             <option value="MRI">MRI</option>
             <option value="ULTRASOUND">超声</option>
@@ -86,16 +81,15 @@
           </select>
         </div>
 
-        <!-- 文本输入区域 -->
         <div class="text-input-section">
-          <input 
-            v-model="inputMessage" 
-            type="text" 
-            placeholder="输入消息..." 
+          <input
+            v-model="inputMessage"
+            type="text"
+            placeholder="输入影像说明、指标问题或上传医学影像..."
             class="text-input"
             @keyup.enter="sendMessage"
           />
-          <button @click="sendMessage" class="send-button">
+          <button @click="sendMessage" class="send-button" :disabled="socketStatus !== 'connected'">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="send-icon">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -105,7 +99,6 @@
       </div>
     </div>
 
-    <!-- 底部操作栏 -->
     <div class="bottom-actions">
       <button @click="generateReport" class="btn-secondary" :disabled="!hasConfirmedResult">
         生成报表
@@ -118,241 +111,262 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { metricApi } from '../utils/api'
+import { authStore } from '../utils/auth.js'
+import { connectMetricAiSocket } from '../utils/ws.js'
 
 const router = useRouter()
 const route = useRoute()
 
-// 患者信息
 const patientId = ref(route.query.patientId || '')
 const patientName = ref(route.query.patientName || '未知患者')
+const currentUser = ref(authStore.getCurrentUser())
 
-// 聊天相关状态
 const messages = ref([])
 const inputMessage = ref('')
 const loading = ref(false)
 const chatMessages = ref(null)
-const imageType = ref('X-RAY')
+const imageType = ref('XRAY')
 const hasConfirmedResult = ref(false)
+const socketStatus = ref('connecting')
+const socketRef = ref(null)
 
-// 计算属性
-const isEmptyInput = computed(() => {
-  return !inputMessage.value.trim()
+const socketStatusLabel = computed(() => {
+  const labelMap = {
+    connecting: '连接中',
+    connected: '已连接',
+    disconnected: '已断开',
+    error: '连接异常',
+  }
+  return labelMap[socketStatus.value] || '未知状态'
 })
 
-/**
- * 处理图片上传
- * @param {Event} event - 上传事件
- */
-const handleImageUpload = (event) => {
-  const files = event.target.files
-  if (files.length > 0) {
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      const reader = new FileReader()
-      
-      reader.onload = (e) => {
-        const imageUrl = e.target.result
-        // 添加到聊天消息
-        messages.value.push({
-          role: 'doctor-message',
-          type: 'image',
-          content: imageUrl,
-          imageType: imageType.value,
-          imageDate: new Date().toISOString().split('T')[0]
-        })
-        
-        // 模拟AI分析
-        setTimeout(() => {
-          analyzeImage(imageUrl, imageType.value)
-        }, 1000)
-      }
-      
-      reader.readAsDataURL(file)
-    }
+const createRequestId = () => `req-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+
+const normalizeConfidence = (value) => {
+  if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
+    return null
   }
+  return Math.round(value)
 }
 
-/**
- * 调用AI分析
- * @param {string} imageUrl - 图片URL
- * @param {string} type - 影像类型
- */
-const analyzeImage = async (imageUrl, type) => {
-  loading.value = true
-  
-  try {
-    // 准备请求数据
-    const requestData = {
-      imageUrl: imageUrl,
-      imageType: type,
-      patientId: patientId.value,
-      patientName: patientName.value
-    }
-    
-    // 调用后端API
-    const response = await metricApi.analyzeAndReport(JSON.stringify(requestData))
-    
-    loading.value = false
-    
-    // 添加AI分析结果
-    messages.value.push({
-      role: 'ai-message',
-      type: 'ai_result',
-      content: response.result || '医学影像检查显示未见明显异常。',
-      confidence: Math.floor(Math.random() * 10) + 90 // 90-99% 置信度
-    })
-    
-    // 滚动到底部
-    scrollToBottom()
-  } catch (error) {
-    loading.value = false
-    console.error('AI分析失败:', error)
-    
-    // 添加错误消息
+const formatConfidence = (value) => {
+  return value == null ? '未提供' : `${value}%`
+}
+
+const connectSocket = () => {
+  const socket = connectMetricAiSocket()
+  socketRef.value = socket
+  socketStatus.value = 'connecting'
+
+  socket.onopen = () => {
+    socketStatus.value = 'connected'
     messages.value.push({
       role: 'system-message',
       type: 'text',
-      content: 'AI分析失败，请稍后重试'
+      content: 'AI 会话已连接，可继续上传医学影像，或咨询影像所见、指标分析与报表相关问题。',
     })
-    
-    // 滚动到底部
+  }
+
+  socket.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data)
+      if (payload.type === 'processing') {
+        loading.value = true
+        return
+      }
+
+      if (payload.type === 'connected') {
+        return
+      }
+
+      if (payload.type === 'error') {
+        loading.value = false
+        messages.value.push({
+          role: 'system-message',
+          type: 'text',
+          content: payload.message || 'AI 会话处理失败，请稍后重试。',
+        })
+        return
+      }
+
+      if (payload.type === 'ai_response') {
+        loading.value = false
+        if (payload.analysisResult) {
+          messages.value.push({
+            role: 'ai-message',
+            type: 'ai_result',
+            content: payload.analysisResult,
+            confidence: normalizeConfidence(payload.confidence),
+          })
+        } else {
+          messages.value.push({
+            role: 'ai-message',
+            type: 'text',
+            content: payload.message || 'AI 已收到请求。',
+          })
+        }
+      }
+    } catch (_error) {
+      loading.value = false
+      messages.value.push({
+        role: 'system-message',
+        type: 'text',
+        content: '收到无法解析的服务端消息。',
+      })
+    }
+
     scrollToBottom()
+  }
+
+  socket.onclose = () => {
+    socketStatus.value = 'disconnected'
+  }
+
+  socket.onerror = () => {
+    socketStatus.value = 'error'
+    loading.value = false
   }
 }
 
-/**
- * 发送消息
- */
-const sendMessage = async () => {
-  if (isEmptyInput.value) return
-  
-  // 添加医生消息
+const sendSocketPayload = (payload) => {
+  if (!socketRef.value || socketRef.value.readyState !== WebSocket.OPEN) {
+    messages.value.push({
+      role: 'system-message',
+      type: 'text',
+      content: 'WebSocket 连接未建立，无法发送到 AI Agent。',
+    })
+    return false
+  }
+
+  loading.value = true
+  socketRef.value.send(JSON.stringify(payload))
+  return true
+}
+
+const buildBasePayload = () => {
+  return {
+    requestId: createRequestId(),
+    patientId: patientId.value,
+    patientName: patientName.value,
+    hospitalId: currentUser.value?.hospitalId || 'unknown-hospital',
+  }
+}
+
+const handleImageUpload = (event) => {
+  const files = event.target.files
+  if (!files?.length) {
+    return
+  }
+
+  Array.from(files).forEach((file) => {
+    const reader = new FileReader()
+    reader.onload = (loadEvent) => {
+      const imageUrl = loadEvent.target?.result
+      if (!imageUrl) {
+        return
+      }
+
+      messages.value.push({
+        role: 'doctor-message',
+        type: 'image',
+        content: imageUrl,
+        imageType: imageType.value,
+        imageDate: new Date().toISOString().split('T')[0],
+      })
+
+      sendSocketPayload({
+        ...buildBasePayload(),
+        type: 'image',
+        imageData: imageUrl,
+        imageType: imageType.value,
+      })
+      scrollToBottom()
+    }
+    reader.readAsDataURL(file)
+  })
+
+  event.target.value = ''
+}
+
+const sendMessage = () => {
+  const text = inputMessage.value.trim()
+  if (!text) {
+    return
+  }
+
   messages.value.push({
     role: 'doctor-message',
     type: 'text',
-    content: inputMessage.value
+    content: text,
   })
-  
-  // 清空输入框
+
   inputMessage.value = ''
-  
-  // 滚动到底部
   scrollToBottom()
-  
-  // 调用AI回复
-  try {
-    loading.value = true
-    
-    // 准备请求数据
-    const requestData = {
-      message: inputMessage.value,
-      patientId: patientId.value,
-      patientName: patientName.value
-    }
-    
-    // 调用后端API
-    const response = await metricApi.analyzeAndReport(JSON.stringify(requestData))
-    
-    loading.value = false
-    
-    // 添加AI回复
-    messages.value.push({
-      role: 'ai-message',
-      type: 'text',
-      content: response.result || '收到您的消息，我会为您提供专业的医学影像分析服务。'
-    })
-    
-    // 滚动到底部
-    scrollToBottom()
-  } catch (error) {
-    loading.value = false
-    console.error('AI回复失败:', error)
-    
-    // 添加错误消息
-    messages.value.push({
-      role: 'system-message',
-      type: 'text',
-      content: 'AI回复失败，请稍后重试'
-    })
-    
-    // 滚动到底部
-    scrollToBottom()
-  }
+
+  sendSocketPayload({
+    ...buildBasePayload(),
+    type: 'chat',
+    message: text,
+  })
 }
 
-/**
- * 确认AI分析结果
- * @param {Object} message - AI结果消息
- */
 const confirmResult = (message) => {
   message.confirmed = true
   hasConfirmedResult.value = true
-  
-  // 添加确认消息
   messages.value.push({
     role: 'system-message',
     type: 'text',
-    content: '分析结果已确认，可以生成报表'
+    content: '分析结果已确认，可以生成报表。',
   })
-  
-  // 滚动到底部
   scrollToBottom()
 }
 
-/**
- * 生成报表
- */
 const generateReport = () => {
-  // 跳转到报表生成页面
   router.push({
     path: '/metric/reports/list',
-    query: { 
-      patientId: patientId.value, 
+    query: {
+      patientId: patientId.value,
       patientName: patientName.value,
-      generate: 'true'
-    }
+      generate: 'true',
+    },
   })
 }
 
-/**
- * 清空聊天
- */
 const clearChat = () => {
-  if (confirm('确定要清空聊天记录吗？')) {
+  if (window.confirm('确定要清空聊天记录吗？')) {
     messages.value = []
     hasConfirmedResult.value = false
+    loading.value = false
   }
 }
 
-/**
- * 返回上一页
- */
 const goBack = () => {
   router.back()
 }
 
-/**
- * 滚动到聊天底部
- */
 const scrollToBottom = () => {
   setTimeout(() => {
     if (chatMessages.value) {
       chatMessages.value.scrollTop = chatMessages.value.scrollHeight
     }
-  }, 100)
+  }, 80)
 }
 
-// 监听消息变化，自动滚动到底部
 watch(messages, () => {
   scrollToBottom()
 }, { deep: true })
 
-// 组件挂载时滚动到底部
 onMounted(() => {
+  connectSocket()
   scrollToBottom()
+})
+
+onUnmounted(() => {
+  if (socketRef.value) {
+    socketRef.value.close()
+  }
 })
 </script>
 
@@ -404,8 +418,32 @@ onMounted(() => {
 }
 
 .patient-info {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
   font-size: 0.9rem;
-  opacity: 0.9;
+  opacity: 0.95;
+}
+
+.socket-status {
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.socket-status.connected {
+  background: rgba(34, 197, 94, 0.22);
+}
+
+.socket-status.connecting {
+  background: rgba(250, 204, 21, 0.25);
+}
+
+.socket-status.disconnected,
+.socket-status.error {
+  background: rgba(248, 113, 113, 0.26);
 }
 
 .chat-container {
@@ -649,8 +687,13 @@ onMounted(() => {
   justify-content: center;
 }
 
-.send-button:hover {
+.send-button:hover:not(:disabled) {
   background-color: #5568d3;
+}
+
+.send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .send-icon {
@@ -667,7 +710,8 @@ onMounted(() => {
   gap: 1rem;
 }
 
-.btn-primary, .btn-secondary {
+.btn-primary,
+.btn-secondary {
   padding: 0.75rem 1.5rem;
   border: none;
   border-radius: 4px;
@@ -700,7 +744,8 @@ onMounted(() => {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.btn-primary:disabled, .btn-secondary:disabled {
+.btn-primary:disabled,
+.btn-secondary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
@@ -713,30 +758,36 @@ onMounted(() => {
     align-items: flex-start;
     gap: 0.5rem;
   }
-  
+
+  .patient-info {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .chat-container {
     margin: 0.5rem;
   }
-  
+
   .chat-messages {
     padding: 1rem;
   }
-  
+
   .message {
     max-width: 90%;
   }
-  
+
   .upload-section {
     flex-direction: column;
     align-items: stretch;
   }
-  
+
   .bottom-actions {
     flex-direction: column;
     gap: 0.5rem;
   }
-  
-  .btn-primary, .btn-secondary {
+
+  .btn-primary,
+  .btn-secondary {
     width: 100%;
   }
 }
