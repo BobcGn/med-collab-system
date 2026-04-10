@@ -5,7 +5,7 @@ import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.datetime
 import java.util.UUID
 
-object MedicalImages : IdTable<String>("analysis.medical_images") {
+object MedicalImages : IdTable<String>("medical_images") {
     val hospitalId = varchar("hospital_id", length = 20)
     val patientId = varchar("patient_id", length = 36)
     val patientName = varchar("patient_name", length = 100)
@@ -13,9 +13,9 @@ object MedicalImages : IdTable<String>("analysis.medical_images") {
     val filePath = varchar("file_path", length = 512)
     val fileSize = long("file_size").nullable()
     val uploadTime = datetime("upload_time").defaultExpression(CurrentDateTime)
-    val status = text("status").default("'uploaded'")
+    val status = text("status").default("uploaded")
     val isDeleted = bool("is_deleted").default(false)
-    override val id = varchar("id", length = 36).autoIncrement().entityId()
+    override val id = varchar("id", length = 36).entityId()
 
     fun generateId(): String = UUID.randomUUID().toString()
 }

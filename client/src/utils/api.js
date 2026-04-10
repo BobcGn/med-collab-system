@@ -1,4 +1,4 @@
-import { getGatewayOrigin } from './runtimeConfig'
+import { getGatewayOrigin, getMetricApiOrigin } from './runtimeConfig'
 
 // API 基础配置
 const GATEWAY_ORIGIN = getGatewayOrigin()
@@ -471,31 +471,32 @@ const patientRequest = async (url, options = {}) => {
 
 // Metric服务 API 配置（通过网关访问）
 const METRIC_API_BASE_URL = GATEWAY_ORIGIN
+const DIRECT_METRIC_API_BASE_URL = getMetricApiOrigin()
 
-const metricRequest = async (url, options = {}) => {
-  const token = localStorage.getItem('token')
-
-  // 修正URL构建逻辑 - 处理不同URL格式
-  let fullUrl
+const buildServiceUrl = (baseUrl, url) => {
   if (url.startsWith('/')) {
-    // 以/开头的路径
-    fullUrl = `${METRIC_API_BASE_URL}${url}`
-  } else if (url.startsWith('?')) {
-    // 以?开头的查询参数
-    fullUrl = `${METRIC_API_BASE_URL}${url}`
-  } else if (url) {
-    // 其他非空路径
-    fullUrl = `${METRIC_API_BASE_URL}/${url}`
-  } else {
-    // 空路径
-    fullUrl = METRIC_API_BASE_URL
+    return `${baseUrl}${url}`
+  }
+  if (url.startsWith('?')) {
+    return `${baseUrl}${url}`
+  }
+  if (url) {
+    return `${baseUrl}/${url}`
+  }
+  return baseUrl
+}
+
+const toDirectMetricPath = (url) => {
+  if (!url.startsWith('/metric')) {
+    return url
   }
 
-  console.log('[Metric API] 请求URL:', fullUrl)
-  console.log('[Metric API] Token存在:', !!token)
-  console.log('[Metric API] Token前缀:', token?.substring(0, 20))
+  const directPath = url.replace(/^\/metric(?=\/|$)/, '')
+  return directPath || '/'
+}
 
-  const config = {
+const buildMetricRequestConfig = (options, token) => {
+  return {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -504,134 +505,198 @@ const metricRequest = async (url, options = {}) => {
       ...options.headers,
     },
   }
+}
 
-  // 记录请求体(仅用于调试)
-  if (options.body) {
-    try {
-      const requestBody = JSON.parse(options.body)
-      console.log('[Metric API] 请求体数据:', JSON.stringify(requestBody, null, 2))
-    } catch (e) {
-      console.log('[Metric API] 请求体原始数据:', options.body)
-    }
+const logMetricRequestBody = (body) => {
+  if (!body) {
+    return
   }
+
+  try {
+    const requestBody = JSON.parse(body)
+    console.log('[Metric API] 请求体数据:', JSON.stringify(requestBody, null, 2))
+  } catch (error) {
+    console.log('[Metric API] 请求体原始数据:', body)
+  }
+}
+
+const refreshMetricToken = async (token) => {
+  const refreshResp = await fetch(`${API_BASE_URL}/refresh`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!refreshResp.ok) {
+    console.error('[Metric API] 刷新 Token 失败，跳转到登录页')
+    localStorage.removeItem('token')
+    localStorage.removeItem('currentUser')
+    window.location.href = '/login'
+    throw new Error('登录已过期，请重新登录')
+  }
+
+  const refreshData = await refreshResp.json()
+  const newToken = refreshData?.token
+  if (!newToken) {
+    localStorage.removeItem('token')
+    localStorage.removeItem('currentUser')
+    window.location.href = '/login'
+    throw new Error('登录已过期，请重新登录')
+  }
+
+  localStorage.setItem('token', newToken)
+  return newToken
+}
+
+const executeMetricFetch = async (url, options = {}) => {
+  const token = localStorage.getItem('token')
+
+  const gatewayUrl = buildServiceUrl(METRIC_API_BASE_URL, url)
+  const directMetricPath = toDirectMetricPath(url)
+  const directServiceUrl = buildServiceUrl(DIRECT_METRIC_API_BASE_URL, directMetricPath)
+  let fullUrl = gatewayUrl
+
+  console.log('[Metric API] 请求URL:', fullUrl)
+  console.log('[Metric API] Token存在:', !!token)
+  console.log('[Metric API] Token前缀:', token?.substring(0, 20))
+
+  const config = buildMetricRequestConfig(options, token)
+  logMetricRequestBody(options.body)
 
   console.log('[Metric API] 请求头Authorization:', config.headers.Authorization ? config.headers.Authorization.substring(0, 30) : '未设置')
   console.log('[Metric API] 完整请求头:', config.headers)
 
-  // 请求metric数据，若返回 401/502/503，则尝试刷新 Token 或重试一次后再报错
   let retryMetric = false
   let retry502 = false
-  try {
-    let response = await fetch(fullUrl, config)
+  let retryDirectMetric = false
+  let response = await fetch(fullUrl, config)
 
-    console.log('[Metric API] 响应状态:', response.status)
-    console.log('[Metric API] 响应OK:', response.ok)
+  console.log('[Metric API] 响应状态:', response.status)
+  console.log('[Metric API] 响应OK:', response.ok)
 
-    // 如果服务端返回 502/503，尝试一次简单重试以应对短暂网关问题
-    if (!response.ok && (response.status === 502 || response.status === 503) && !retry502) {
-      retry502 = true
-      console.warn('[Metric API] 收到后端网关错误 (502/503)，尝试重试一次')
-      response = await fetch(fullUrl, config)
-      console.log('[Metric API] 重试后响应状态:', response.status)
-      console.log('[Metric API] 重试后响应OK:', response.ok)
-    }
+  if (!response.ok && (response.status === 502 || response.status === 503) && !retry502) {
+    retry502 = true
+    console.warn('[Metric API] 收到后端网关错误 (502/503)，尝试重试一次')
+    response = await fetch(fullUrl, config)
+    console.log('[Metric API] 重试后响应状态:', response.status)
+    console.log('[Metric API] 重试后响应OK:', response.ok)
+  }
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
-      console.error('[Metric API] 请求失败，详细信息:', {
-        status: response.status,
-        url: fullUrl,
-        error: error,
-        requestBody: options.body
-      })
-      // 401 时尝试自动刷新 Token
-      if (response.status === 401 && token && !retryMetric) {
-        try {
-          const refreshResp = await fetch(`${API_BASE_URL}/refresh`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-          })
-          if (refreshResp.ok) {
-            const refreshData = await refreshResp.json()
-            const newToken = refreshData?.token
-            if (newToken) {
-              localStorage.setItem('token', newToken)
-              // 更新请求头中的 token，然后重试
-              config.headers = {
-                ...config.headers,
-                Authorization: `Bearer ${newToken}`,
-              }
-              retryMetric = true
-              response = await fetch(fullUrl, config)
-              if (!response.ok) {
-                const err2 = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
-                console.error('[Metric API] 重试请求失败，详细信息:', {
-                  status: response.status,
-                  url: fullUrl,
-                  error: err2
-                })
-                throw new Error(err2.message || `请求失败 (${response.status})`)
-              }
-            }
-          } else {
-            // 刷新 Token 失败，说明当前 Token 已完全无效，跳转到登录页
-            console.error('[Metric API] 刷新 Token 失败，跳转到登录页')
-            // 清除认证信息
-            localStorage.removeItem('token')
-            localStorage.removeItem('currentUser')
-            // 跳转到登录页
-            window.location.href = '/login'
-            throw new Error('登录已过期，请重新登录')
-          }
-        } catch (e) {
-          // 刷新 Token 时发生错误，说明当前 Token 已完全无效，跳转到登录页
-          console.error('[Metric API] 刷新 Token 时发生错误，跳转到登录页:', e)
-          // 清除认证信息
-          localStorage.removeItem('token')
-          localStorage.removeItem('currentUser')
-          // 跳转到登录页
-          window.location.href = '/login'
-          throw new Error('登录已过期，请重新登录')
-        }
-      }
-      // 构建详细的错误信息
-      const errorMessage = error.message || error.error || error.detail || `请求失败 (${response.status})`
-      const detailedError = `${errorMessage} (状态码: ${response.status})`
-      console.error('[Metric API] 详细错误信息:', detailedError)
-      throw new Error(detailedError)
-    }
+  if (!response.ok && response.status === 403 && !retryDirectMetric) {
+    retryDirectMetric = true
+    fullUrl = directServiceUrl
+    console.warn('[Metric API] 网关返回 403，回退到 metric-service 直连:', fullUrl)
+    response = await fetch(fullUrl, config)
+    console.log('[Metric API] 直连后响应状态:', response.status)
+    console.log('[Metric API] 直连后响应OK:', response.ok)
+  }
 
-    // 处理空响应体的情况
-    const contentType = response.headers.get('content-type')
-    if (!contentType || !contentType.includes('application/json')) {
-      // 如果响应体不是JSON，返回空数组
-      console.log('[Metric API] 响应体不是JSON，返回空数组')
-      return []
-    }
-
-    // 尝试解析响应体
+  if (!response.ok && response.status === 401 && token && !retryMetric) {
     try {
-      // 先检查响应体是否为空
-      const text = await response.text()
-      if (!text) {
-        // 如果响应体为空，返回空数组
-        console.log('[Metric API] 响应体为空，返回空数组')
-        return []
+      const newToken = await refreshMetricToken(token)
+      config.headers = {
+        ...config.headers,
+        Authorization: `Bearer ${newToken}`,
       }
-      // 如果响应体不为空，尝试解析它
-      const data = JSON.parse(text)
-      console.log('[Metric API] 响应体解析成功:', data)
-      return data
-    } catch (e) {
-      // 如果解析失败，返回空数组
-      console.log('[Metric API] 响应体解析失败，返回空数组:', e)
+      retryMetric = true
+      response = await fetch(fullUrl, config)
+      if (!response.ok && response.status === 403 && !retryDirectMetric) {
+        retryDirectMetric = true
+        fullUrl = directServiceUrl
+        console.warn('[Metric API] 刷新 Token 后网关仍返回 403，回退到 metric-service 直连:', fullUrl)
+        response = await fetch(fullUrl, config)
+        console.log('[Metric API] 刷新后直连响应状态:', response.status)
+        console.log('[Metric API] 刷新后直连响应OK:', response.ok)
+      }
+    } catch (error) {
+      console.error('[Metric API] 刷新 Token 时发生错误，跳转到登录页:', error)
+      localStorage.removeItem('token')
+      localStorage.removeItem('currentUser')
+      window.location.href = '/login'
+      throw new Error('登录已过期，请重新登录')
+    }
+  }
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: '请求失败', code: response.status }))
+    console.error('[Metric API] 请求失败，详细信息:', {
+      status: response.status,
+      url: fullUrl,
+      error: error,
+      requestBody: options.body
+    })
+    const errorMessage = error.message || error.error || error.detail || `请求失败 (${response.status})`
+    const detailedError = `${errorMessage} (状态码: ${response.status})`
+    console.error('[Metric API] 详细错误信息:', detailedError)
+    throw new Error(detailedError)
+  }
+
+  return response
+}
+
+const parseMetricJsonResponse = async (response) => {
+  const contentType = response.headers.get('content-type')
+  if (!contentType || !contentType.includes('application/json')) {
+    console.log('[Metric API] 响应体不是JSON，返回空数组')
+    return []
+  }
+
+  try {
+    const text = await response.text()
+    if (!text) {
+      console.log('[Metric API] 响应体为空，返回空数组')
       return []
     }
+    const data = JSON.parse(text)
+    console.log('[Metric API] 响应体解析成功:', data)
+    return data
+  } catch (error) {
+    console.log('[Metric API] 响应体解析失败，返回空数组:', error)
+    return []
+  }
+}
+
+const extractFileName = (contentDisposition) => {
+  if (!contentDisposition) {
+    return ''
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+
+  const basicMatch = contentDisposition.match(/filename=\"?([^\";]+)\"?/i)
+  return basicMatch?.[1] || ''
+}
+
+const metricRequest = async (url, options = {}) => {
+  try {
+    const response = await executeMetricFetch(url, options)
+    return await parseMetricJsonResponse(response)
   } catch (error) {
     console.error('Metric API请求异常:', error)
+    throw error
+  }
+}
+
+const metricFileRequest = async (url, options = {}) => {
+  try {
+    const response = await executeMetricFetch(url, {
+      ...options,
+      headers: {
+        Accept: 'application/pdf',
+        ...options.headers,
+      },
+    })
+    return {
+      blob: await response.blob(),
+      fileName: extractFileName(response.headers.get('content-disposition')),
+    }
+  } catch (error) {
+    console.error('Metric 文件请求异常:', error)
     throw error
   }
 }
@@ -763,6 +828,26 @@ export const metricApi = {
     method: 'GET',
   }),
 
+  // ==================== 对话历史 API ====================
+  getConversationHistory: (conversationId, params = {}) => {
+    const query = new URLSearchParams(params).toString()
+    return metricRequest(`/metric/conversations/${encodeURIComponent(conversationId)}${query ? `?${query}` : ''}`, {
+      method: 'GET',
+    })
+  },
+
+  saveConversationHistory: (conversationId, data) => metricRequest(`/metric/conversations/${encodeURIComponent(conversationId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  }),
+
+  clearConversationHistory: (conversationId, hospitalId) => {
+    const query = hospitalId ? `?hospitalId=${encodeURIComponent(hospitalId)}` : ''
+    return metricRequest(`/metric/conversations/${encodeURIComponent(conversationId)}${query}`, {
+      method: 'DELETE',
+    })
+  },
+
   // ==================== 报表 API ====================
   // 获取所有报表
   getAllReports: () => metricRequest('/metric/reports', {
@@ -777,6 +862,11 @@ export const metricApi = {
 
   // 根据患者姓名查询报表
   getReportsByPatientName: (patientName) => metricRequest(`/metric/reports/patient/${encodeURIComponent(patientName)}`, {
+    method: 'GET',
+  }),
+
+  // 下载或预览报表文件
+  getReportFile: (reportId, disposition = 'inline') => metricFileRequest(`/metric/reports/${encodeURIComponent(reportId)}/file?disposition=${encodeURIComponent(disposition)}`, {
     method: 'GET',
   }),
 

@@ -57,10 +57,14 @@ internal data class MedicalImageAnalysisPayload(
 
 @Serializable
 internal data class GeneratedReportPayload(
+    val analysis: AnalysisResultDto.AnalysisResultComplete,
     val report: ReportDto.ReportComplete,
     val analysisId: String,
     val imageType: String,
+    val analysisMode: String,
     val summary: String,
+    val keyIndicators: List<IndicatorItem>,
+    val findings: List<String>,
     val conclusion: String,
     val recommendations: List<String>,
     val limitations: List<String> = emptyList(),

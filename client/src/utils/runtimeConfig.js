@@ -21,6 +21,11 @@ export const getGatewayOrigin = () => {
     || buildOrigin(resolveHttpProtocol(), import.meta.env.VITE_GATEWAY_PORT || 8088)
 }
 
+export const getMetricApiOrigin = () => {
+  return normalizeConfiguredOrigin(import.meta.env.VITE_METRIC_API_ORIGIN, resolveHttpProtocol())
+    || buildOrigin(resolveHttpProtocol(), import.meta.env.VITE_METRIC_API_PORT || 8083)
+}
+
 export const getAuthWsOrigin = () => {
   return normalizeConfiguredOrigin(import.meta.env.VITE_AUTH_WS_ORIGIN, resolveWsProtocol())
     || buildOrigin(resolveWsProtocol(), import.meta.env.VITE_AUTH_WS_PORT || 8081)

@@ -5,8 +5,10 @@ import enums.ImageType
 import kotlinx.coroutines.runBlocking
 import java.awt.Color
 import java.awt.image.BufferedImage
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertContains
@@ -47,6 +49,38 @@ class MedicalImageToolChainTest {
     }
 
     @Test
+    fun `should analyze uploaded data url into pixel payload`() {
+        runBlocking {
+            val imagePath = createSampleImage()
+
+            try {
+                val dataUrl = toDataUrl(imagePath)
+                val rawResult = MedicalImageAnalyzerTool.execute(
+                    MedicalImageAnalyzerTool.Args(
+                        imagePath = dataUrl,
+                        imageType = ImageType.XRAY,
+                        hospitalId = "H-003",
+                        patientId = "P-003",
+                        patientName = "王五",
+                    ),
+                )
+
+                val payload = toolJson.decodeFromString(
+                    MedicalImageAnalysisPayload.serializer(),
+                    rawResult,
+                )
+
+                assertEquals("PIXEL", payload.analysisMode)
+                assertEquals("DATA_URL", payload.source.sourceType)
+                assertEquals("王五", payload.analysis.patientName)
+                assertTrue(payload.summary.contains("像素级分析"))
+            } finally {
+                Files.deleteIfExists(imagePath)
+            }
+        }
+    }
+
+    @Test
     fun `should generate markdown report from analysis payload`() {
         runBlocking {
             val imagePath = createSampleImage()
@@ -77,6 +111,9 @@ class MedicalImageToolChainTest {
                 reportPath = Path.of(payload.report.filePath!!)
                 assertEquals("generated", payload.report.status)
                 assertTrue(Files.exists(reportPath))
+                assertTrue(reportPath.fileName.toString().endsWith(".pdf"))
+                val headerBytes = Files.readAllBytes(reportPath).copyOfRange(0, 5)
+                assertEquals("%PDF-", String(headerBytes, StandardCharsets.ISO_8859_1))
                 assertContains(payload.reportContent, "李四")
                 assertContains(payload.reportContent, "关键指标")
             } finally {
@@ -102,5 +139,10 @@ class MedicalImageToolChainTest {
         val path = Files.createTempFile("metric-ai-tool-", ".png")
         ImageIO.write(image, "png", path.toFile())
         return path
+    }
+
+    private fun toDataUrl(path: Path): String {
+        val bytes = Files.readAllBytes(path)
+        return "data:image/png;base64,${Base64.getEncoder().encodeToString(bytes)}"
     }
 }

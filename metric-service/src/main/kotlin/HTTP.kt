@@ -12,12 +12,21 @@ import org.jetbrains.exposed.sql.*
 
 fun Application.configureHTTP() {
     install(CORS) {
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Options)
         allowMethod(HttpMethod.Put)
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Patch)
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader(HttpHeaders.Accept)
         allowHeader(HttpHeaders.Authorization)
+        allowHeader(HttpHeaders.Origin)
+        allowHeader(HttpHeaders.XForwardedProto)
+        allowHeader("X-Requested-With")
         allowHeader("MyCustomHeader")
+        allowCredentials = true
+        allowNonSimpleContentTypes = true
         anyHost() // @TODO: Don't do this in production if possible. Try to limit it.
     }
 }

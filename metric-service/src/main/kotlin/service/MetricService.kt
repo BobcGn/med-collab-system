@@ -76,7 +76,7 @@ class MetricService(
      * @param report 报表创建请求
      * @return 创建结果
      */
-    suspend fun createReport(report: ReportDto.ReportCreate) = 
+    suspend fun createReport(report: ReportDto.ReportComplete) = 
         reportRepository.createReport(report)
     
     /**
@@ -93,4 +93,12 @@ class MetricService(
      */
     suspend fun getReportsByPatientName(patientName: String) = 
         reportRepository.getReportsByPatientName(patientName)
+
+    /**
+     * 根据报表ID查询报表
+     * @param reportId 报表ID
+     * @return 报表详情
+     */
+    suspend fun getReportById(reportId: String) =
+        reportRepository.getReportById(reportId)
 }

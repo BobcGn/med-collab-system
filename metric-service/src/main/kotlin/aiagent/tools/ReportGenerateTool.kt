@@ -7,10 +7,8 @@ import dto.MetricDto
 import dto.ReportDto
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardOpenOption
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -75,10 +73,14 @@ object ReportGenerateTool : Tool<ReportGenerateTool.Args, String>() {
             )
 
             val payload = GeneratedReportPayload(
+                analysis = analysisPayload.analysis,
                 report = report,
                 analysisId = analysisPayload.analysis.id,
                 imageType = analysisPayload.imageType,
+                analysisMode = analysisPayload.analysisMode,
                 summary = analysisPayload.summary,
+                keyIndicators = analysisPayload.keyIndicators,
+                findings = analysisPayload.findings,
                 conclusion = conclusion,
                 recommendations = analysisPayload.recommendations,
                 limitations = analysisPayload.limitations,
@@ -337,21 +339,9 @@ private fun buildNumberedSection(items: List<String>): String {
 }
 
 private fun writeReportFile(reportId: String, patientId: String, content: String): Path {
-    val reportDir = Path.of(System.getProperty("user.dir"))
-        .resolve("generated-reports")
-        .toAbsolutePath()
-        .normalize()
-    Files.createDirectories(reportDir)
-
-    val safePatientId = patientId.ifBlank { "unknown" }.replace(Regex("[^A-Za-z0-9_-]"), "_")
-    val reportPath = reportDir.resolve("${safePatientId}_$reportId.md")
-    Files.writeString(
-        reportPath,
-        content,
-        StandardCharsets.UTF_8,
-        StandardOpenOption.CREATE,
-        StandardOpenOption.TRUNCATE_EXISTING,
-        StandardOpenOption.WRITE,
+    return writeReportPdf(
+        reportId = reportId,
+        patientId = patientId,
+        content = content,
     )
-    return reportPath
 }

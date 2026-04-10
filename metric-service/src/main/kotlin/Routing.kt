@@ -3,6 +3,10 @@ package com.example
 import ai.koog.ktor.aiAgent
 import ai.koog.prompt.executor.clients.deepseek.DeepSeekModels
 import aiagent.strategy.metricReportStrategy
+import aiagent.tools.GeneratedReportPayload
+import aiagent.tools.MedicalImageAnalysisPayload
+import aiagent.tools.MedicalImageAnalyzerTool
+import aiagent.tools.ReportGenerateTool
 import aiagent.validation.MetricAiConversationScope
 import aiagent.validation.buildUnsupportedMetricAiPrompt
 import aiagent.validation.determineMetricAiConversationScope
@@ -18,6 +22,7 @@ import dto.ReportDto
 import dto.SocketUserContext
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.http.content.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -25,16 +30,25 @@ import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.transactions.transaction
+import enums.ImageType
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.LocalDateTime
+import java.util.UUID
 import utils.JwtUtil
 
 private val socketJson = Json { ignoreUnknownKeys = true }
+private val metricPayloadJson = Json {
+    ignoreUnknownKeys = true
+    classDiscriminator = "kind"
+}
 
 internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
     val analysisRepository = AnalysisRepository()
     val medicalImageRepository = MedicalImageRepository()
     val reportRepository = ReportRepository()
     val metricService = MetricService(analysisRepository, medicalImageRepository, reportRepository)
+    val conversationHistoryStore = ConversationHistoryStore()
     val jwtUtil = JwtUtil(environment.config)
 
     routing {
@@ -126,9 +140,9 @@ internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
 
             post {
                 try {
-                    val result = call.receive<AnalysisResultDto.AnalysisResultComplete>()
+                    val result = decodeAnalysisResult(call.receiveText())
                     val createdResult = metricService.createAnalysisResult(result)
-                    call.respond(HttpStatusCode.Created, mapOf<String, Any>("id" to createdResult))
+                    call.respond(HttpStatusCode.Created, mapOf("id" to createdResult))
                 } catch (e: Exception) {
                     application.log.error("创建分析结果失败", e)
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
@@ -160,9 +174,9 @@ internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
 
             post {
                 try {
-                    val report = call.receive<ReportDto.ReportCreate>()
+                    val report = decodeReport(call.receiveText())
                     val createdReport = metricService.createReport(report)
-                    call.respond(HttpStatusCode.Created, mapOf<String, Any>("id" to createdReport))
+                    call.respond(HttpStatusCode.Created, mapOf("id" to createdReport))
                 } catch (e: Exception) {
                     application.log.error("创建报表失败", e)
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
@@ -176,6 +190,101 @@ internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
                     call.respond(HttpStatusCode.OK, reports)
                 } catch (e: Exception) {
                     application.log.error("查询报表失败", e)
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                }
+            }
+
+            get("/{id}/file") {
+                try {
+                    val reportId = call.parameters["id"] ?: throw IllegalArgumentException("报表ID不能为空")
+                    val report = metricService.getReportById(reportId)
+                        ?: run {
+                            call.respond(HttpStatusCode.NotFound, mapOf("error" to "报表不存在"))
+                            return@get
+                        }
+                    val filePath = report.filePath
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { Path.of(it).toAbsolutePath().normalize() }
+                        ?: run {
+                            call.respond(HttpStatusCode.NotFound, mapOf("error" to "报表文件不存在"))
+                            return@get
+                        }
+                    val reportDirectory = resolveProjectSubdirectory("reports")
+                    if (!isDescendantPath(filePath, reportDirectory)) {
+                        call.respond(HttpStatusCode.Forbidden, mapOf("error" to "无权访问该报表文件"))
+                        return@get
+                    }
+                    if (!Files.exists(filePath)) {
+                        call.respond(HttpStatusCode.NotFound, mapOf("error" to "报表文件不存在"))
+                        return@get
+                    }
+
+                    val disposition = when (call.request.queryParameters["disposition"]?.lowercase()) {
+                        "attachment" -> ContentDisposition.Attachment
+                        else -> ContentDisposition.Inline
+                    }
+                    call.response.header(
+                        HttpHeaders.ContentDisposition,
+                        disposition.withParameter(
+                            ContentDisposition.Parameters.FileName,
+                            filePath.fileName.toString(),
+                        ).toString(),
+                    )
+                    call.response.header(HttpHeaders.ContentType, ContentType.Application.Pdf.toString())
+                    call.respondFile(filePath.toFile())
+                } catch (e: Exception) {
+                    application.log.error("获取报表文件失败", e)
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                }
+            }
+        }
+
+        route("/conversations") {
+            get("/{conversationId}") {
+                try {
+                    val conversationId = call.parameters["conversationId"] ?: throw IllegalArgumentException("会话ID不能为空")
+                    val hospitalId = call.request.queryParameters["hospitalId"].orEmpty().ifBlank { "unknown-hospital" }
+                    val patientName = call.request.queryParameters["patientName"].orEmpty()
+                    val history = conversationHistoryStore.loadConversation(conversationId, hospitalId)
+                        ?: ConversationHistoryDocument(
+                            conversationId = conversationId,
+                            patientName = patientName,
+                            hospitalId = hospitalId,
+                            messages = emptyList(),
+                            updatedAt = LocalDateTime.now().toString(),
+                        )
+                    call.respond(HttpStatusCode.OK, history)
+                } catch (e: Exception) {
+                    application.log.error("加载会话历史失败", e)
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                }
+            }
+
+            put("/{conversationId}") {
+                try {
+                    val conversationId = call.parameters["conversationId"] ?: throw IllegalArgumentException("会话ID不能为空")
+                    val request = call.receive<ConversationHistoryDocument>()
+                    val savedHistory = conversationHistoryStore.saveConversation(
+                        request.copy(
+                            conversationId = conversationId,
+                            updatedAt = LocalDateTime.now().toString(),
+                        ),
+                    )
+                    call.respond(HttpStatusCode.OK, savedHistory)
+                } catch (e: Exception) {
+                    application.log.error("保存会话历史失败", e)
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
+                }
+            }
+
+            delete("/{conversationId}") {
+                try {
+                    val conversationId = call.parameters["conversationId"] ?: throw IllegalArgumentException("会话ID不能为空")
+                    val hospitalId = call.request.queryParameters["hospitalId"].orEmpty().ifBlank { "unknown-hospital" }
+                    val deleted = conversationHistoryStore.deleteConversation(conversationId, hospitalId)
+                    call.respond(HttpStatusCode.OK, mapOf("deleted" to deleted))
+                } catch (e: Exception) {
+                    application.log.error("删除会话历史失败", e)
                     call.respond(HttpStatusCode.InternalServerError, mapOf("error" to e.message))
                 }
             }
@@ -367,19 +476,34 @@ private suspend fun buildAiResponse(
         MetricAiConversationScope.IMAGE_ANALYSIS -> Unit
     }
 
+    val localExecution = runCatching {
+        runLocalMetricPipeline(normalizedRequest)
+    }
+
+    if (localExecution.isSuccess) {
+        return MetricAiSocketEnvelope(
+            type = "ai_response",
+            requestId = normalizedRequest.requestId,
+            message = "影像分析完成",
+            analysisResult = localExecution.getOrNull(),
+            confidence = 95,
+            createdAt = createdAt,
+            user = user,
+        )
+    }
+
     if (!deepSeekSettings.isConfigured) {
+        val error = localExecution.exceptionOrNull() ?: IllegalStateException(deepSeekSettings.unavailableReason())
         return buildUnavailableAiResponse(
             request = normalizedRequest,
             user = user,
             createdAt = createdAt,
-            reason = deepSeekSettings.unavailableReason(),
+            reason = error.message ?: deepSeekSettings.unavailableReason(),
         )
     }
 
     val agentInput = normalizedRequest.toAgentInput()
-    val executionResult = runCatching {
-        executeAgent(agentInput)
-    }
+    val executionResult = runCatching { executeAgent(agentInput) }
 
     return executionResult.fold(
         onSuccess = { analysisResult ->
@@ -388,7 +512,7 @@ private suspend fun buildAiResponse(
                 requestId = normalizedRequest.requestId,
                 message = "影像分析完成",
                 analysisResult = analysisResult,
-                confidence = 95,
+                confidence = 90,
                 createdAt = createdAt,
                 user = user,
             )
@@ -488,6 +612,74 @@ private fun buildUnavailableAiResponse(
         confidence = 0,
         createdAt = createdAt,
         user = user,
+    )
+}
+
+private suspend fun runLocalMetricPipeline(request: MetricAiSocketRequest): String {
+    val analysisResult = MedicalImageAnalyzerTool.execute(
+        MedicalImageAnalyzerTool.Args(
+            imagePath = request.imageData?.trim().orEmpty(),
+            imageType = parseImageType(request.imageType),
+            hospitalId = request.hospitalId.orEmpty(),
+            patientId = request.patientId.orEmpty(),
+            patientName = request.patientName.orEmpty(),
+        ),
+    )
+
+    return ReportGenerateTool.execute(
+        ReportGenerateTool.Args(
+            analysisResult = analysisResult,
+        ),
+    )
+}
+
+private fun parseImageType(rawType: String?): ImageType {
+    return when (rawType?.trim()?.uppercase()?.replace("-", "")?.replace("_", "")) {
+        "XRAY" -> ImageType.XRAY
+        "CT" -> ImageType.CT
+        "MRI" -> ImageType.MRI
+        "ULTRASOUND" -> ImageType.ULTRASOUND
+        "PATHOLOGY" -> ImageType.PATHOLOGY
+        else -> ImageType.OTHER
+    }
+}
+
+private fun decodeAnalysisResult(rawBody: String): AnalysisResultDto.AnalysisResultComplete {
+    runCatching {
+        metricPayloadJson.decodeFromString(GeneratedReportPayload.serializer(), rawBody).analysis
+    }.getOrNull()?.let { return it }
+
+    runCatching {
+        metricPayloadJson.decodeFromString(MedicalImageAnalysisPayload.serializer(), rawBody).analysis
+    }.getOrNull()?.let { return it }
+
+    return metricPayloadJson.decodeFromString(AnalysisResultDto.AnalysisResultComplete.serializer(), rawBody)
+}
+
+private fun decodeReport(rawBody: String): ReportDto.ReportComplete {
+    runCatching {
+        metricPayloadJson.decodeFromString(GeneratedReportPayload.serializer(), rawBody).report
+    }.getOrNull()?.let { return it }
+
+    runCatching {
+        metricPayloadJson.decodeFromString(ReportDto.ReportComplete.serializer(), rawBody)
+    }.getOrNull()?.let { return it }
+
+    val createRequest = metricPayloadJson.decodeFromString(ReportDto.ReportCreate.serializer(), rawBody)
+    val now = LocalDateTime.now().toString()
+    return ReportDto.ReportComplete(
+        id = UUID.randomUUID().toString(),
+        hospitalId = createRequest.hospitalId,
+        patientId = createRequest.patientId,
+        patientName = createRequest.patientName,
+        analysisIds = createRequest.analysisIds,
+        reportType = createRequest.reportType,
+        filePath = null,
+        fileSize = null,
+        status = "generating",
+        createdAt = now,
+        generatedAt = null,
+        errorMessage = null,
     )
 }
 

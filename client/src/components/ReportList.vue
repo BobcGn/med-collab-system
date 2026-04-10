@@ -76,8 +76,12 @@
               </div>
             </div>
             <div class="card-actions">
-              <button @click="viewReport(report)" class="btn-secondary" :disabled="!report.filePath">查看</button>
-              <button @click="downloadReport(report)" class="btn-secondary" :disabled="!report.filePath">下载</button>
+              <button @click="viewReport(report)" class="btn-secondary" :disabled="!report.filePath || activeFileReportId === report.id">
+                {{ activeFileReportId === report.id ? '处理中...' : '查看' }}
+              </button>
+              <button @click="downloadReport(report)" class="btn-secondary" :disabled="!report.filePath || activeFileReportId === report.id">
+                {{ activeFileReportId === report.id ? '处理中...' : '下载' }}
+              </button>
             </div>
           </div>
         </div>
@@ -127,6 +131,7 @@ const reportTypeFilter = ref('')
 const searchKeyword = ref('')
 const currentPage = ref(0)
 const pageSize = ref(5)
+const activeFileReportId = ref('')
 
 // 计算属性
 const filteredReports = computed(() => {
@@ -174,12 +179,19 @@ const buildReportPreview = (report) => {
     return `生成失败: ${report.errorMessage}`
   }
   if (report.filePath) {
-    return `报表文件: ${report.filePath}`
+    return `PDF 文件: ${report.filePath}`
   }
   if (Array.isArray(report.analysisIds) && report.analysisIds.length > 0) {
     return `已关联 ${report.analysisIds.length} 条分析结果`
   }
   return '暂无报表内容预览'
+}
+
+const extractFileNameFromPath = (filePath) => {
+  if (!filePath) {
+    return ''
+  }
+  return filePath.split('/').pop() || ''
 }
 
 const normalizeReport = (report) => {
@@ -192,6 +204,7 @@ const normalizeReport = (report) => {
     status: report.status || 'unknown',
     statusText: formatReportStatus(report.status),
     filePath: report.filePath || '',
+    fileName: extractFileNameFromPath(report.filePath),
   }
 }
 
@@ -242,10 +255,7 @@ const refreshReports = () => {
  * @param {Object} report - 报表对象
  */
 const viewReport = (report) => {
-  if (!report.filePath) {
-    return
-  }
-  window.open(report.filePath, '_blank', 'noopener,noreferrer')
+  openReportFile(report, 'inline')
 }
 
 /**
@@ -253,10 +263,39 @@ const viewReport = (report) => {
  * @param {Object} report - 报表对象
  */
 const downloadReport = (report) => {
+  openReportFile(report, 'attachment')
+}
+
+const openReportFile = async (report, disposition) => {
   if (!report.filePath) {
     return
   }
-  window.open(report.filePath, '_blank', 'noopener,noreferrer')
+
+  activeFileReportId.value = report.id
+  try {
+    const { blob, fileName } = await metricApi.getReportFile(report.id, disposition)
+    const blobUrl = URL.createObjectURL(blob)
+
+    if (disposition === 'attachment') {
+      const link = document.createElement('a')
+      link.href = blobUrl
+      link.download = fileName || report.fileName || `${report.reportTitle}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+    } else {
+      window.open(blobUrl, '_blank', 'noopener,noreferrer')
+    }
+
+    window.setTimeout(() => {
+      URL.revokeObjectURL(blobUrl)
+    }, 60_000)
+  } catch (error) {
+    console.error('获取报表文件失败:', error)
+    window.alert(error.message || '获取报表文件失败，请稍后重试。')
+  } finally {
+    activeFileReportId.value = ''
+  }
 }
 
 /**

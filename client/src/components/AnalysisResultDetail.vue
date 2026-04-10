@@ -53,7 +53,7 @@
           <div class="filter-section">
             <select v-model="analysisTypeFilter" @change="filterResults" class="filter-select">
               <option value="">全部类型</option>
-              <option value="X-RAY">X射线</option>
+              <option value="XRAY">X射线</option>
               <option value="CT">CT</option>
               <option value="MRI">MRI</option>
               <option value="ULTRASOUND">超声</option>
@@ -103,6 +103,54 @@
               <div class="doctor-diagnosis" v-if="result.doctorDiagnosis">
                 <h5>医生诊断</h5>
                 <p>{{ result.doctorDiagnosis }}</p>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button @click="toggleDetail(result)" class="btn-secondary">
+                {{ expandedResultId === result.id ? '收起详情' : '查看详情' }}
+              </button>
+            </div>
+            <div v-if="expandedResultId === result.id" class="detail-panel">
+              <div class="detail-grid">
+                <div class="detail-item">
+                  <span class="detail-label">分析ID</span>
+                  <span class="detail-value">{{ result.id }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">影像ID</span>
+                  <span class="detail-value">{{ result.imageId }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">分析状态</span>
+                  <span class="detail-value">{{ result.statusText }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">创建时间</span>
+                  <span class="detail-value">{{ formatDateTime(result.createdAt) }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">完成时间</span>
+                  <span class="detail-value">{{ formatDateTime(result.completedAt) }}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">结果摘要</span>
+                  <span class="detail-value">{{ result.result }}</span>
+                </div>
+              </div>
+
+              <div v-if="result.detailItems.length" class="detail-section">
+                <h5>结构化指标</h5>
+                <div class="metric-detail-grid">
+                  <div v-for="item in result.detailItems" :key="`${result.id}-${item.label}-${item.value}`" class="metric-detail-card">
+                    <span class="metric-detail-label">{{ item.label }}</span>
+                    <strong class="metric-detail-value">{{ item.value }}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="result.rawMetricsText" class="detail-section">
+                <h5>原始指标 JSON</h5>
+                <pre class="metric-raw-json">{{ result.rawMetricsText }}</pre>
               </div>
             </div>
           </div>
@@ -159,6 +207,7 @@ const analysisTypeFilter = ref('')
 const searchKeyword = ref('')
 const currentPage = ref(0)
 const pageSize = ref(5)
+const expandedResultId = ref('')
 
 // 计算属性
 const filteredResults = computed(() => {
@@ -174,7 +223,8 @@ const filteredResults = computed(() => {
     const keyword = searchKeyword.value.toLowerCase()
     results = results.filter(result => 
       result.result.toLowerCase().includes(keyword) ||
-      result.doctorDiagnosis?.toLowerCase().includes(keyword)
+      result.doctorDiagnosis?.toLowerCase().includes(keyword) ||
+      result.detailSearchText.toLowerCase().includes(keyword)
     )
   }
   
@@ -248,6 +298,46 @@ const formatMetricLabel = (key) => {
   return labelMap[key] || key
 }
 
+const formatMetricValue = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(formatMetricValue).join('、')
+  }
+
+  if (value && typeof value === 'object') {
+    return JSON.stringify(value)
+  }
+
+  return value == null ? '-' : `${value}`
+}
+
+const collectMetricDetailItems = (metrics) => {
+  if (!metrics || typeof metrics !== 'object') {
+    return []
+  }
+
+  if (Array.isArray(metrics.metrics)) {
+    return metrics.metrics.flatMap(collectMetricDetailItems)
+  }
+
+  return Object.entries(metrics)
+    .filter(([key, value]) => key !== 'kind' && value != null && value !== '')
+    .map(([key, value]) => ({
+      label: formatMetricLabel(key),
+      value: formatMetricValue(value),
+    }))
+}
+
+const formatAnalysisStatus = (status) => {
+  const statusMap = {
+    completed: '已完成',
+    success: '已完成',
+    pending: '待处理',
+    running: '分析中',
+    failed: '失败',
+  }
+  return statusMap[status] || status || '-'
+}
+
 const summarizeMetrics = (metrics) => {
   if (!metrics) {
     return ''
@@ -304,6 +394,8 @@ const inferAnalysisType = (result) => {
 }
 
 const normalizeAnalysisResult = (result) => {
+  const rawMetricsText = result.metrics ? JSON.stringify(result.metrics, null, 2) : ''
+  const detailItems = collectMetricDetailItems(result.metrics)
   return {
     id: result.id,
     analysisType: inferAnalysisType(result),
@@ -311,6 +403,19 @@ const normalizeAnalysisResult = (result) => {
     result: result.summary || summarizeMetrics(result.metrics) || result.errorMessage || '暂无分析摘要',
     confidence: extractConfidence(result.metrics),
     doctorDiagnosis: result.errorMessage || '',
+    imageId: result.imageId || '-',
+    status: result.status || '',
+    statusText: formatAnalysisStatus(result.status),
+    createdAt: result.createdAt || '',
+    completedAt: result.completedAt || '',
+    detailItems,
+    rawMetricsText,
+    detailSearchText: [
+      result.summary,
+      result.errorMessage,
+      rawMetricsText,
+      detailItems.map((item) => `${item.label}:${item.value}`).join(' '),
+    ].filter(Boolean).join(' '),
   }
 }
 
@@ -372,6 +477,10 @@ const changePage = (newPage) => {
   currentPage.value = newPage
 }
 
+const toggleDetail = (result) => {
+  expandedResultId.value = expandedResultId.value === result.id ? '' : result.id
+}
+
 /**
  * 返回上一页
  */
@@ -388,6 +497,15 @@ const formatDate = (dateString) => {
   if (!dateString) return '-'
   const date = new Date(dateString)
   return date.toLocaleDateString('zh-CN')
+}
+
+const formatDateTime = (dateString) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) {
+    return dateString
+  }
+  return date.toLocaleString('zh-CN')
 }
 
 // 组件挂载时加载数据
@@ -691,6 +809,91 @@ onMounted(() => {
   display: flex;
   gap: 1rem;
   justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+.detail-panel {
+  margin-top: 1rem;
+  border-top: 1px solid #eef1f7;
+  padding-top: 1rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+}
+
+.detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem;
+  border-radius: 10px;
+  background: #f8faff;
+  border: 1px solid #e4ebff;
+}
+
+.detail-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #667085;
+}
+
+.detail-value {
+  font-size: 0.92rem;
+  color: #24324a;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.detail-section {
+  margin-top: 1rem;
+}
+
+.detail-section h5 {
+  margin: 0 0 0.75rem;
+  color: #334155;
+  font-size: 0.95rem;
+}
+
+.metric-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+
+.metric-detail-card {
+  padding: 0.8rem;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.metric-detail-label {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.metric-detail-value {
+  font-size: 0.92rem;
+  color: #111827;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.metric-raw-json {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 12px;
+  background: #111827;
+  color: #e5eefc;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  overflow-x: auto;
 }
 
 .btn-primary, .btn-secondary {

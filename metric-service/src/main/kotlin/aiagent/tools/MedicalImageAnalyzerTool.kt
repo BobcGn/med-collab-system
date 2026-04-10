@@ -9,10 +9,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
 import java.awt.image.BufferedImage
 import java.net.URI
+import java.net.URLDecoder
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.time.LocalDateTime
+import java.util.Base64
 import java.util.UUID
 import javax.imageio.ImageIO
 import kotlin.math.abs
@@ -127,6 +129,10 @@ private fun requireNotBlank(value: String, message: String): String {
 
 private fun loadSource(reference: String): SourceData {
     val normalized = reference.trim().removeSurrounding("\"")
+    if (normalized.startsWith("data:", ignoreCase = true)) {
+        return loadDataUrl(normalized)
+    }
+
     if (normalized.startsWith("inline-image://", ignoreCase = true)) {
         return loadInlineReference(normalized)
     }
@@ -185,6 +191,43 @@ private fun loadInlineReference(reference: String): SourceData {
             rasterDataAvailable = false,
         ),
         image = null,
+    )
+}
+
+private fun loadDataUrl(reference: String): SourceData {
+    val header = reference.substringBefore(',')
+    val payload = reference.substringAfter(',', "")
+    require(payload.isNotBlank()) { "影像数据为空" }
+
+    val mimeType = header
+        .substringAfter("data:", "")
+        .substringBefore(';')
+        .ifBlank { "application/octet-stream" }
+
+    val bytes = if (header.contains(";base64", ignoreCase = true)) {
+        runCatching { Base64.getDecoder().decode(payload) }
+            .getOrElse { throw IllegalArgumentException("影像数据解码失败", it) }
+    } else {
+        URLDecoder.decode(payload, Charsets.UTF_8).toByteArray(Charsets.UTF_8)
+    }
+
+    val image = bytes.inputStream().use { ImageIO.read(it) }
+        ?: throw IllegalArgumentException("影像数据无法解码为栅格图像")
+
+    return SourceData(
+        snapshot = ImageSourceSnapshot(
+            reference = reference.take(96) + if (reference.length > 96) "...(truncated)" else "",
+            resolvedPath = null,
+            sourceType = "DATA_URL",
+            format = mimeType.substringAfterLast('/').uppercase(),
+            mimeType = mimeType,
+            fileSizeBytes = bytes.size.toLong(),
+            width = image.width,
+            height = image.height,
+            readable = true,
+            rasterDataAvailable = true,
+        ),
+        image = image,
     )
 }
 
