@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="${ROOT_DIR}/.run/logs"
-CLIENT_DIR="${ROOT_DIR}/client"
+FRONTEND_DIR="${ROOT_DIR}/frontend"
 
 BACKEND_SERVICES=("auth-service" "patient-service" "metric-service" "api-gateway")
 BACKEND_PORTS=(8081 8082 8083 8088)
@@ -149,15 +149,15 @@ parse_args() {
 }
 
 build_frontend() {
-  log "Installing client dependencies..."
-  pushd "${CLIENT_DIR}" >/dev/null
+  log "Installing frontend dependencies..."
+  pushd "${FRONTEND_DIR}" >/dev/null
   if [[ -f "package-lock.json" ]]; then
     npm ci --no-audit --no-fund
   else
     npm install --no-audit --no-fund
   fi
 
-  log "Building client..."
+  log "Building frontend..."
   npm run build
   popd >/dev/null
 }
@@ -188,12 +188,12 @@ start_backend_services() {
 }
 
 start_frontend() {
-  ensure_port_free "${CLIENT_PORT}" "client"
-  pushd "${CLIENT_DIR}" >/dev/null
+  ensure_port_free "${CLIENT_PORT}" "frontend"
+  pushd "${FRONTEND_DIR}" >/dev/null
   if [[ "${FRONTEND_MODE}" == "preview" ]]; then
-    start_process "client-preview" "${CLIENT_PORT}" npm run preview -- --host 0.0.0.0 --port "${CLIENT_PORT}"
+    start_process "frontend-preview" "${CLIENT_PORT}" npm run preview -- --host 0.0.0.0 --port "${CLIENT_PORT}"
   else
-    start_process "client-dev" "${CLIENT_PORT}" npm run dev -- --host 0.0.0.0 --port "${CLIENT_PORT}"
+    start_process "frontend-dev" "${CLIENT_PORT}" npm run dev -- --host 0.0.0.0 --port "${CLIENT_PORT}"
   fi
   popd >/dev/null
 }
@@ -223,7 +223,7 @@ main() {
   require_cmd npm
 
   [[ -x "${ROOT_DIR}/gradlew" ]] || fail "Cannot find executable gradlew in project root"
-  [[ -d "${CLIENT_DIR}" ]] || fail "Cannot find client directory"
+  [[ -d "${FRONTEND_DIR}" ]] || fail "Cannot find frontend directory"
 
   mkdir -p "${LOG_DIR}"
 
