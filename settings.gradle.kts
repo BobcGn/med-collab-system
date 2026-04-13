@@ -1,5 +1,8 @@
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
 }
 
 rootProject.name = "med-collab-system"
@@ -7,7 +10,6 @@ rootProject.name = "med-collab-system"
 dependencyResolutionManagement {
     repositories {
         mavenCentral()
-        gradlePluginPortal()
     }
 }
 

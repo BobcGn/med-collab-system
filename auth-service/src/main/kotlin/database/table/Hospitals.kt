@@ -5,7 +5,7 @@ import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.datetime
 
 
-object Hospitals : IdTable<String>("med_auth.hospital") {
+object Hospitals : IdTable<String>("hospital") {
     val name = varchar("name", 100)
     val isActive = bool("is_active").default(true)
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)

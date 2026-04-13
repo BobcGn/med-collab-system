@@ -14,6 +14,16 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import org.jetbrains.exposed.sql.transactions.transaction
+import kotlinx.serialization.Serializable
+
+@Serializable
+private data class PatientHealthResponse(
+    val status: String,
+    val service: String,
+    val database: String,
+    val patientCount: Long? = null,
+    val error: String? = null,
+)
 
 fun Application.configureRouting() {
     // 创建Repository和Service实例
@@ -30,20 +40,26 @@ fun Application.configureRouting() {
                 val result = transaction {
                     PatientEntity.all().count()
                 }
-                call.respond(HttpStatusCode.OK, mapOf(
-                    "status" to "ok",
-                    "service" to "patient-service",
-                    "database" to "connected",
-                    "patientCount" to result
-                ))
+                call.respond(
+                    HttpStatusCode.OK,
+                    PatientHealthResponse(
+                        status = "ok",
+                        service = "patient-service",
+                        database = "connected",
+                        patientCount = result,
+                    ),
+                )
             } catch (e: Exception) {
                 application.log.error("健康检查失败", e)
-                call.respond(HttpStatusCode.InternalServerError, mapOf(
-                    "status" to "error",
-                    "service" to "patient-service",
-                    "database" to "disconnected",
-                    "error" to e.message
-                ))
+                call.respond(
+                    HttpStatusCode.InternalServerError,
+                    PatientHealthResponse(
+                        status = "error",
+                        service = "patient-service",
+                        database = "disconnected",
+                        error = e.message,
+                    ),
+                )
             }
         }
 

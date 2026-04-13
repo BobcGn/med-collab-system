@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.toServerJdbcUrl
 import database.table.AnalysisResults
 import database.table.MedicalImages
 import database.table.Reports
@@ -15,14 +16,15 @@ fun Application.configureDatabases() {
     val databasePassword = environment.config.property("database.mysql.password").getString()
     val databaseDriver = environment.config.property("database.mysql.driver").getString()
 
-    ensureDatabaseExists(
-        databaseUrl = databaseUrl,
-        databaseUser = databaseUser,
-        databasePassword = databasePassword,
-        databaseDriver = databaseDriver,
-    )
+    if (databaseUrl.startsWith("jdbc:mysql:", ignoreCase = true)) {
+        ensureDatabaseExists(
+            databaseUrl = databaseUrl,
+            databaseUser = databaseUser,
+            databasePassword = databasePassword,
+            databaseDriver = databaseDriver,
+        )
+    }
 
-    // 连接数据库
     val database = Database.connect(
         url = databaseUrl,
         user = databaseUser,
@@ -37,6 +39,8 @@ fun Application.configureDatabases() {
             Reports,
         )
     }
+
+    log.info("Metric service database initialized with {}", databaseDriver)
 }
 
 private fun Application.ensureDatabaseExists(

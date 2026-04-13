@@ -4,7 +4,7 @@ import org.jetbrains.exposed.dao.id.IdTable
 import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.datetime
 
-object Departments : IdTable<kotlin.String>("med_auth.department") {
+object Departments : IdTable<kotlin.String>("department") {
 
     val name = varchar("name", length = 100)
     val hospitalId = varchar("hospital_id", length = 20)

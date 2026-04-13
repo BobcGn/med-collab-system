@@ -6,7 +6,7 @@ import org.jetbrains.exposed.sql.javatime.datetime
 import java.util.UUID
 
 
-object Users : IdTable<String>("med_auth.user") {
+object Users : IdTable<String>("user") {
     val hospitalId = varchar("hospital_id", length = 20).nullable()
     val deptCode = varchar("dept_code", length = 20).nullable()
     val userSeq = varchar("user_seq", length = 20)
