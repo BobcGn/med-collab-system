@@ -19,6 +19,18 @@ class UserService(
      * @throws AuthException.PasswordTooWeakException
      */
     suspend fun registerUser(user: UserDto.UserRegister): UserDto.RegisterResponse {
+        val normalizedRole = user.role.trim().lowercase()
+        val normalizedFullName = user.fullName.trim()
+        val validRoles = setOf("admin", "doctor", "nurse", "receptionist")
+
+        if (normalizedRole !in validRoles) {
+            throw AuthException.RoleInvalidException()
+        }
+
+        if (normalizedFullName.isBlank()) {
+            throw IllegalArgumentException("姓名不能为空")
+        }
+
         // 检查密码强度
         if (!isPasswordStrong(user.password)) {
             throw AuthException.PasswordTooWeakException()
@@ -28,7 +40,7 @@ class UserService(
         val encryptedPassword = hashPassword(user.password)
 
         // 根据角色处理不同的注册逻辑
-        if (user.role == "admin") {
+        if (normalizedRole == "admin") {
             // 管理员注册
             // 生成临时用户ID（实际会被数据库生成的ID替换）
             val tempUserId = System.currentTimeMillis().toString().takeLast(6)
@@ -41,7 +53,7 @@ class UserService(
                 deptCode = null,
                 userSeq = tempUserId,
                 username = adminUsername,
-                fullName = user.fullName,
+                fullName = normalizedFullName,
                 passwordHash = encryptedPassword,
                 role = "admin"
             )
@@ -57,8 +69,10 @@ class UserService(
         } else {
             // 普通用户注册
             // 验证医院和科室是否有效
-            val hospitalId = user.hospitalId ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
-            val deptCode = user.deptCode ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
+            val hospitalId = user.hospitalId?.trim()?.takeIf { it.isNotEmpty() }
+                ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
+            val deptCode = user.deptCode?.trim()?.takeIf { it.isNotEmpty() }
+                ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
 
             if (!userRepository.existsByHospitalAndDept(hospitalId, deptCode)) {
                 throw AuthException.HospitalOrDepartmentIdInvalidException()
@@ -75,9 +89,9 @@ class UserService(
                 deptCode = deptCode,
                 userSeq = tempUserId,
                 username = userUsername,
-                fullName = user.fullName,
+                fullName = normalizedFullName,
                 passwordHash = encryptedPassword,
-                role = "doctor" // 默认角色
+                role = normalizedRole
             )
 
             val userId = userRepository.createUser(userCreate)
