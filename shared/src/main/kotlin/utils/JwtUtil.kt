@@ -12,14 +12,21 @@ class JwtUtil(config: ApplicationConfig) {
     private val jwtExpiration: Long = config.property("jwt.expiration").getString().toLong()
     private val audience: String = config.property("jwt.audience").getString()
     private val issuer: String = config.property("jwt.issuer").getString()
+    private val realm: String = config.propertyOrNull("jwt.realm")?.getString() ?: "med-collab-system"
 
-    private val verifier: JWTVerifier by lazy {
+    private val jwtVerifier: JWTVerifier by lazy {
         val algorithm = com.auth0.jwt.algorithms.Algorithm.HMAC256(secret)
         com.auth0.jwt.JWT.require(algorithm)
             .withIssuer(issuer)
             .withAudience(audience)
             .build()
     }
+
+    fun getVerifier(): JWTVerifier = jwtVerifier
+
+    fun getAudience(): String = audience
+
+    fun getRealm(): String = realm
 
     /**
      * 为指定用户生成JWT令牌，携带自定义声明
@@ -66,7 +73,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun validateToken(token: String): Boolean {
         return try {
-            verifier.verify(token)
+            jwtVerifier.verify(token)
             true
         } catch (e: Exception) {
             false
@@ -81,7 +88,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getUserIdFromToken(token: String): String? {
         return try {
-            val principal = verifier.verify(token)
+            val principal = jwtVerifier.verify(token)
             principal.subject
         } catch (e: Exception) {
             println("解析令牌失败: ${e.message}")
@@ -97,7 +104,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getUsernameFromToken(token: String): String? {
         return try {
-            val principal = verifier.verify(token)
+            val principal = jwtVerifier.verify(token)
             principal.getClaim("username").asString()
         } catch (e: Exception) {
             println("解析用户名失败: ${e.message}")
@@ -114,7 +121,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun <T> getClaimFromToken(token: String, key: String, clazz: Class<T>): T? {
         return try {
-            val principal = verifier.verify(token)
+            val principal = jwtVerifier.verify(token)
             val claim = principal.getClaim(key)
             if (claim.isNull) {
                 null
@@ -141,7 +148,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun isTokenExpired(token: String): Boolean {
         return try {
-            val principal = verifier.verify(token)
+            val principal = jwtVerifier.verify(token)
             principal.expiresAt.before(Date())
         } catch (e: Exception) {
             true
@@ -156,7 +163,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getExpirationDateFromToken(token: String): Date? {
         return try {
-            val principal = verifier.verify(token)
+            val principal = jwtVerifier.verify(token)
             principal.expiresAt
         } catch (e: Exception) {
             null
@@ -171,7 +178,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun getIssuedAtDateFromToken(token: String): Date? {
         return try {
-            val principal = verifier.verify(token)
+            val principal = jwtVerifier.verify(token)
             principal.issuedAt
         } catch (e: Exception) {
             null
@@ -186,7 +193,7 @@ class JwtUtil(config: ApplicationConfig) {
      */
     fun refreshToken(token: String): String? {
         return try {
-            val principal = verifier.verify(token)
+            val principal = jwtVerifier.verify(token)
             val userId = principal.subject ?: return null
             val username = principal.getClaim("username").asString() ?: return null
 
