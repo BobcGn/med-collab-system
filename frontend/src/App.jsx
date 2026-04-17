@@ -218,6 +218,208 @@ function formatGender(gender) {
   return labels[gender] || gender || '-'
 }
 
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function roundSvgValue(value) {
+  return Number(value.toFixed(2))
+}
+
+function svgPoint(x, y) {
+  return `${roundSvgValue(x)},${roundSvgValue(y)}`
+}
+
+function normalizeContourPoints(contour) {
+  if (!Array.isArray(contour)) {
+    return []
+  }
+
+  return contour
+    .map((point) => {
+      const x = Number(point?.xPercent)
+      const y = Number(point?.yPercent)
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return null
+      }
+      return {
+        x: clampNumber(x, 0, 100),
+        y: clampNumber(y, 0, 100),
+      }
+    })
+    .filter(Boolean)
+}
+
+function buildSmoothClosedPath(points) {
+  if (!points.length) {
+    return ''
+  }
+  if (points.length < 3) {
+    return `M ${points.map((point) => svgPoint(point.x, point.y)).join(' L ')} Z`
+  }
+
+  const closedPoints = points[0].x === points[points.length - 1].x && points[0].y === points[points.length - 1].y
+    ? points.slice(0, -1)
+    : points
+
+  if (closedPoints.length < 3) {
+    return `M ${closedPoints.map((point) => svgPoint(point.x, point.y)).join(' L ')} Z`
+  }
+
+  const midPoint = (first, second) => ({
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2,
+  })
+
+  const firstMid = midPoint(closedPoints[0], closedPoints[1])
+  const commands = [`M ${svgPoint(firstMid.x, firstMid.y)}`]
+
+  for (let index = 0; index < closedPoints.length; index += 1) {
+    const current = closedPoints[index]
+    const next = closedPoints[(index + 1) % closedPoints.length]
+    const nextMid = midPoint(current, next)
+    commands.push(`Q ${svgPoint(current.x, current.y)} ${svgPoint(nextMid.x, nextMid.y)}`)
+  }
+
+  commands.push('Z')
+  return commands.join(' ')
+}
+
+function buildEllipsePath(left, top, width, height) {
+  const right = left + width
+  const bottom = top + height
+  const centerX = left + (width / 2)
+  const centerY = top + (height / 2)
+  const controlX = width * 0.55
+  const controlY = height * 0.55
+
+  return [
+    `M ${svgPoint(centerX, top)}`,
+    `C ${svgPoint(centerX + controlX, top)} ${svgPoint(right, centerY - controlY)} ${svgPoint(right, centerY)}`,
+    `C ${svgPoint(right, centerY + controlY)} ${svgPoint(centerX + controlX, bottom)} ${svgPoint(centerX, bottom)}`,
+    `C ${svgPoint(centerX - controlX, bottom)} ${svgPoint(left, centerY + controlY)} ${svgPoint(left, centerY)}`,
+    `C ${svgPoint(left, centerY - controlY)} ${svgPoint(centerX - controlX, top)} ${svgPoint(centerX, top)}`,
+    'Z',
+  ].join(' ')
+}
+
+function buildPillPath(left, top, width, height) {
+  const right = left + width
+  const bottom = top + height
+  const radius = Math.min(width, height) / 2
+
+  return [
+    `M ${svgPoint(left + radius, top)}`,
+    `L ${svgPoint(right - radius, top)}`,
+    `Q ${svgPoint(right, top)} ${svgPoint(right, top + radius)}`,
+    `L ${svgPoint(right, bottom - radius)}`,
+    `Q ${svgPoint(right, bottom)} ${svgPoint(right - radius, bottom)}`,
+    `L ${svgPoint(left + radius, bottom)}`,
+    `Q ${svgPoint(left, bottom)} ${svgPoint(left, bottom - radius)}`,
+    `L ${svgPoint(left, top + radius)}`,
+    `Q ${svgPoint(left, top)} ${svgPoint(left + radius, top)}`,
+    'Z',
+  ].join(' ')
+}
+
+function buildBlobPath(left, top, width, height, variant = 0) {
+  const right = left + width
+  const bottom = top + height
+  const centerX = left + (width / 2)
+  const centerY = top + (height / 2)
+  const wobbleX = width * (0.07 + ((variant % 3) * 0.015))
+  const wobbleY = height * (0.08 + ((variant % 2) * 0.02))
+
+  return [
+    `M ${svgPoint(centerX, top + (height * 0.05))}`,
+    `C ${svgPoint(right - (width * 0.12), top - wobbleY)} ${svgPoint(right + wobbleX, top + (height * 0.2))} ${svgPoint(right - (width * 0.04), centerY - (height * 0.08))}`,
+    `C ${svgPoint(right + wobbleX, centerY + (height * 0.1))} ${svgPoint(right - (width * 0.08), bottom + wobbleY)} ${svgPoint(centerX + (width * 0.08), bottom - (height * 0.04))}`,
+    `C ${svgPoint(centerX - (width * 0.12), bottom + wobbleY)} ${svgPoint(left - wobbleX, bottom - (height * 0.12))} ${svgPoint(left + (width * 0.08), centerY + (height * 0.12))}`,
+    `C ${svgPoint(left - wobbleX, centerY - (height * 0.1))} ${svgPoint(left + (width * 0.1), top - wobbleY)} ${svgPoint(centerX, top + (height * 0.05))}`,
+    'Z',
+  ].join(' ')
+}
+
+function insetBounds(left, top, width, height, insetRatio = 0.12) {
+  const insetX = width * insetRatio
+  const insetY = height * insetRatio
+  return {
+    left: left + insetX,
+    top: top + insetY,
+    width: Math.max(width - (insetX * 2), width * 0.4),
+    height: Math.max(height - (insetY * 2), height * 0.4),
+  }
+}
+
+function buildRegionPath(shape, left, top, width, height, variant = 0) {
+  if (shape === 'ellipse') {
+    return buildEllipsePath(left, top, width, height)
+  }
+  if (shape === 'pill') {
+    return buildPillPath(left, top, width, height)
+  }
+  return buildBlobPath(left, top, width, height, variant)
+}
+
+function buildRegionVisual(region, index) {
+  const left = clampNumber(region.boundingBox.leftPercent, 1, 92)
+  const top = clampNumber(region.boundingBox.topPercent, 1, 92)
+  const width = clampNumber(region.boundingBox.widthPercent, 6, 42)
+  const height = clampNumber(region.boundingBox.heightPercent, 6, 42)
+  const centerX = left + (width / 2)
+  const centerY = top + (height / 2)
+  const innerBounds = insetBounds(left, top, width, height, 0.16)
+  const shape = typeof region.shape === 'string' ? region.shape.toLowerCase() : 'blob'
+  const preferRight = centerX <= 58
+  const labelWidth = clampNumber(16 + Math.max(region.annotationTitle?.length || 0, `${region.colorName}${region.label}`.length) * 0.7, 18, 26)
+  const labelHeight = 10.5
+  const labelX = clampNumber(
+    preferRight ? left + width + 4.5 : left - labelWidth - 4.5,
+    2.5,
+    100 - labelWidth - 2.5,
+  )
+  const labelY = clampNumber(centerY - (labelHeight / 2) + ((index % 3) - 1) * 2.2, 4, 100 - labelHeight - 3)
+  const calloutEdgeX = preferRight ? labelX : labelX + labelWidth
+  const calloutAnchorX = preferRight ? left + width - 0.3 : left + 0.3
+  const calloutAnchorY = clampNumber(centerY, 4, 96)
+  const bendX = preferRight ? calloutAnchorX + 3.4 : calloutAnchorX - 3.4
+  const bendY = clampNumber(calloutAnchorY + ((index % 2 === 0) ? -2 : 2), 4, 96)
+  const contour = normalizeContourPoints(region.contour)
+  const hasContour = contour.length >= 4
+  const outerPath = contour.length >= 4
+    ? buildSmoothClosedPath(contour)
+    : buildRegionPath(shape, left, top, width, height, index)
+  const innerContour = contour.length >= 4
+    ? contour.map((point) => ({
+      x: centerX + ((point.x - centerX) * 0.84),
+      y: centerY + ((point.y - centerY) * 0.84),
+    }))
+    : []
+
+  return {
+    centerX,
+    centerY,
+    outerPath,
+    innerPath: innerContour.length >= 4
+      ? buildSmoothClosedPath(innerContour)
+      : buildRegionPath(shape, innerBounds.left, innerBounds.top, innerBounds.width, innerBounds.height, index + 1),
+    rotationDegrees: hasContour ? 0 : (Number.isFinite(Number(region.rotationDegrees)) ? Number(region.rotationDegrees) : 0),
+    label: {
+      x: labelX,
+      y: labelY,
+      width: labelWidth,
+      height: labelHeight,
+      linePoints: [
+        svgPoint(calloutAnchorX, calloutAnchorY),
+        svgPoint(bendX, bendY),
+        svgPoint(calloutEdgeX, labelY + (labelHeight / 2)),
+      ].join(' '),
+      title: `${region.colorName}${region.label}`,
+      subtitle: region.annotationTitle || region.location || '高亮标注',
+    },
+  }
+}
+
 function formatBloodType(value) {
   const labels = {
     A: 'A型',
@@ -4154,10 +4356,11 @@ function MedicalImageChatPage() {
   const [imageType, setImageType] = useState('XRAY')
   const [socketStatus, setSocketStatus] = useState('connecting')
   const [confirmedResultMessageId, setConfirmedResultMessageId] = useState('')
-  const [generatingReport, setGeneratingReport] = useState(false)
+  const [generatingReportMessageId, setGeneratingReportMessageId] = useState('')
   const [historyReady, setHistoryReady] = useState(false)
   const socketRef = useRef(null)
   const chatScrollRef = useRef(null)
+  const uploadInputRef = useRef(null)
   const persistTimerRef = useRef(null)
   const suppressPersistenceRef = useRef(false)
 
@@ -4166,6 +4369,8 @@ function MedicalImageChatPage() {
   const createRequestId = () => `req-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
   const getHospitalId = () => currentUser?.hospitalId || 'unknown-hospital'
   const getConversationId = () => patientId || patientName || 'unknown-patient'
+  const buildImageMessageId = (requestId) => `img-${requestId}`
+  const buildResultMessageId = (requestId) => `result-${requestId}`
 
   const scrollToBottom = () => {
     window.setTimeout(() => {
@@ -4276,6 +4481,105 @@ function MedicalImageChatPage() {
       ? value.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
       : []
 
+    const normalizeIndicatorItems = (value) => Array.isArray(value)
+      ? value.map((item) => {
+        if (!isRecord(item) || typeof item.name !== 'string') {
+          return null
+        }
+        return {
+          name: item.name,
+          value: typeof item.value === 'string' ? item.value : formatValue(item.value),
+          unit: typeof item.unit === 'string' ? item.unit : '',
+          interpretation: typeof item.interpretation === 'string' ? item.interpretation : '',
+        }
+      }).filter(Boolean)
+      : []
+
+    const normalizePercent = (value) => {
+      const numeric = Number(value)
+      if (!Number.isFinite(numeric)) {
+        return 0
+      }
+      return Math.max(0, Math.min(100, numeric))
+    }
+
+    const normalizeHexColor = (value, fallback = '#2563EB') => {
+      if (typeof value !== 'string') {
+        return fallback
+      }
+      const normalized = value.trim()
+      return /^#[\dA-Fa-f]{6}$/.test(normalized) ? normalized.toUpperCase() : fallback
+    }
+
+    const normalizeHighlightRegions = (value) => Array.isArray(value)
+      ? value.map((region, index) => {
+        if (!isRecord(region) || !isRecord(region.boundingBox)) {
+          return null
+        }
+        return {
+          id: typeof region.id === 'string' ? region.id : `lesion-${index + 1}`,
+          label: typeof region.label === 'string' ? region.label : `L${index + 1}`,
+          colorName: typeof region.colorName === 'string' ? region.colorName : `区域 ${index + 1}`,
+          colorHex: normalizeHexColor(region.colorHex),
+          priority: Number.isFinite(Number(region.priority)) ? Number(region.priority) : index + 1,
+          annotationTitle: typeof region.annotationTitle === 'string' ? region.annotationTitle : '高亮区域',
+          annotationMeaning: typeof region.annotationMeaning === 'string' ? region.annotationMeaning : '',
+          location: typeof region.location === 'string' ? region.location : '未标注位置',
+          severity: typeof region.severity === 'string' ? region.severity : '',
+          confidence: normalizeConfidence(region.confidence),
+          coveragePercent: normalizePercent(region.coveragePercent),
+          estimatedSizeMm: typeof region.estimatedSizeMm === 'number'
+            ? Number(region.estimatedSizeMm.toFixed(1))
+            : null,
+          shape: typeof region.shape === 'string' ? region.shape.toLowerCase() : 'blob',
+          rotationDegrees: Number.isFinite(Number(region.rotationDegrees))
+            ? Number(region.rotationDegrees)
+            : 0,
+          contour: Array.isArray(region.contour)
+            ? region.contour.map((point) => {
+              if (!isRecord(point)) {
+                return null
+              }
+              return {
+                xPercent: normalizePercent(point.xPercent),
+                yPercent: normalizePercent(point.yPercent),
+              }
+            }).filter(Boolean)
+            : [],
+          note: typeof region.note === 'string' ? region.note : '',
+          boundingBox: {
+            leftPercent: normalizePercent(region.boundingBox.leftPercent),
+            topPercent: normalizePercent(region.boundingBox.topPercent),
+            widthPercent: normalizePercent(region.boundingBox.widthPercent),
+            heightPercent: normalizePercent(region.boundingBox.heightPercent),
+          },
+        }
+      }).filter(Boolean)
+      : []
+
+    const normalizeHighlightLegend = (value) => Array.isArray(value)
+      ? value.map((item, index) => {
+        if (!isRecord(item)) {
+          return null
+        }
+        return {
+          colorName: typeof item.colorName === 'string' ? item.colorName : `标记 ${index + 1}`,
+          colorHex: normalizeHexColor(item.colorHex),
+          meaning: typeof item.meaning === 'string' ? item.meaning : '',
+        }
+      }).filter(Boolean)
+      : []
+
+    const formatAnalysisModeLabel = (value) => {
+      if (value === 'PIXEL') {
+        return '像素级分析'
+      }
+      if (value === 'METADATA_ONLY') {
+        return '元数据级分析'
+      }
+      return typeof value === 'string' ? value : ''
+    }
+
     const parseStructuredPayload = (rawPayload) => {
       if (typeof rawPayload !== 'string' || !rawPayload.trim()) {
         return null
@@ -4297,6 +4601,8 @@ function MedicalImageChatPage() {
             keyIndicators: [],
             findings: [],
             recommendations: [],
+            highlightRegions: [],
+            highlightLegend: [],
             limitations: typeof parsed.detail === 'string' ? [parsed.detail] : [],
             conclusion: '',
             reportContent: '',
@@ -4308,17 +4614,31 @@ function MedicalImageChatPage() {
           return null
         }
 
+        const explicitIndicators = normalizeIndicatorItems(parsed.keyIndicators)
+        const fallbackIndicators = extractMetricIndicators(analysis.metrics)
+        const highlightRegions = normalizeHighlightRegions(parsed.highlightRegions)
+        const explicitLegend = normalizeHighlightLegend(parsed.highlightLegend)
+        const highlightLegend = explicitLegend.length
+          ? explicitLegend
+          : highlightRegions.map((region) => ({
+            colorName: region.colorName,
+            colorHex: region.colorHex,
+            meaning: region.note || `第 ${region.priority} 优先级复核区域`,
+          }))
+
         return {
           kind: isRecord(parsed.report) ? 'generated_report' : 'analysis',
           analysis,
           report: isRecord(parsed.report) ? parsed.report : null,
           summary: typeof parsed.summary === 'string'
             ? parsed.summary
-            : extractMetricIndicators(analysis.metrics).slice(0, 3).map((item) => `${item.name}: ${item.value}`).join('，'),
-          analysisModeLabel: parsed.analysisMode || '',
-          keyIndicators: extractMetricIndicators(analysis.metrics),
+            : (explicitIndicators.length ? explicitIndicators : fallbackIndicators).slice(0, 3).map((item) => `${item.name}: ${item.value}`).join('，'),
+          analysisModeLabel: formatAnalysisModeLabel(parsed.analysisMode),
+          keyIndicators: explicitIndicators.length ? explicitIndicators : fallbackIndicators,
           findings: normalizeTextList(parsed.findings),
           recommendations: normalizeTextList(parsed.recommendations),
+          highlightRegions,
+          highlightLegend,
           limitations: normalizeTextList(parsed.limitations),
           conclusion: typeof parsed.conclusion === 'string' ? parsed.conclusion : '',
           reportContent: typeof parsed.reportContent === 'string' ? parsed.reportContent : '',
@@ -4332,9 +4652,19 @@ function MedicalImageChatPage() {
       if (!isRecord(message) || typeof message.type !== 'string') {
         return null
       }
+      const normalizedRequestId = typeof message.requestId === 'string' ? message.requestId : ''
+      const normalizedId = (() => {
+        if (message.type === 'image' && normalizedRequestId) {
+          return buildImageMessageId(normalizedRequestId)
+        }
+        if (message.type === 'ai_result' && normalizedRequestId) {
+          return buildResultMessageId(normalizedRequestId)
+        }
+        return typeof message.id === 'string' ? message.id : createRequestId()
+      })()
       return {
         ...message,
-        id: typeof message.id === 'string' ? message.id : createRequestId(),
+        id: normalizedId,
         saving: false,
       }
     }
@@ -4407,12 +4737,17 @@ function MedicalImageChatPage() {
               setMessages((current) => [
                 ...current,
                 {
-                  id: payload.requestId || createRequestId(),
+                  id: buildResultMessageId(payload.requestId || createRequestId()),
+                  requestId: payload.requestId || '',
                   role: 'ai-message',
                   type: 'ai_result',
                   content: structuredPayload?.summary || payload.analysisResult || payload.message || 'AI 已完成分析。',
                   confidence,
                   structuredPayload,
+                  sourceImage: current
+                    .slice()
+                    .reverse()
+                    .find((item) => item.type === 'image' && item.requestId === (payload.requestId || ''))?.content || null,
                   persistableAnalysis: Boolean(structuredPayload?.analysis),
                   confirmed: false,
                   saving: false,
@@ -4469,8 +4804,12 @@ function MedicalImageChatPage() {
         const restoredMessages = Array.isArray(response?.messages)
           ? response.messages.map(restoreHistoryMessage).filter(Boolean)
           : []
+        const rawConfirmedId = typeof response?.confirmedResultMessageId === 'string' ? response.confirmedResultMessageId : ''
+        const normalizedConfirmedId = restoredMessages.find((message) => message.id === rawConfirmedId)?.id
+          || restoredMessages.find((message) => message.type === 'ai_result' && message.requestId === rawConfirmedId)?.id
+          || ''
         setMessages(restoredMessages)
-        setConfirmedResultMessageId(typeof response?.confirmedResultMessageId === 'string' ? response.confirmedResultMessageId : '')
+        setConfirmedResultMessageId(normalizedConfirmedId)
       } catch (error) {
         console.error('加载对话历史失败:', error)
         if (active) {
@@ -4526,6 +4865,44 @@ function MedicalImageChatPage() {
     hospitalId: getHospitalId(),
   })
 
+  const hexToRgba = (hex, alpha = 0.18) => {
+    if (typeof hex !== 'string' || !/^#[\dA-Fa-f]{6}$/.test(hex.trim())) {
+      return `rgba(37, 99, 235, ${alpha})`
+    }
+    const normalized = hex.trim()
+    const red = Number.parseInt(normalized.slice(1, 3), 16)
+    const green = Number.parseInt(normalized.slice(3, 5), 16)
+    const blue = Number.parseInt(normalized.slice(5, 7), 16)
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`
+  }
+
+  const getHighlightLegendItems = (structuredPayload) => {
+    if (Array.isArray(structuredPayload?.highlightLegend) && structuredPayload.highlightLegend.length) {
+      return structuredPayload.highlightLegend
+    }
+    if (Array.isArray(structuredPayload?.highlightRegions)) {
+      return structuredPayload.highlightRegions.map((region) => ({
+        colorName: region.colorName,
+        colorHex: region.colorHex,
+        meaning: region.annotationMeaning || region.note || `第 ${region.priority || 1} 优先级复核区域`,
+      }))
+    }
+    return []
+  }
+
+  const findReferenceImageForResult = (message) => {
+    if (typeof message?.sourceImage === 'string' && message.sourceImage) {
+      return message.sourceImage
+    }
+    if (!message?.requestId) {
+      return null
+    }
+    const messageIndex = messages.findIndex((item) => item.id === message.id)
+    const searchPool = messageIndex > 0 ? messages.slice(0, messageIndex).reverse() : [...messages].reverse()
+    const matched = searchPool.find((item) => item.type === 'image' && item.requestId === message.requestId)
+    return matched?.content || null
+  }
+
   const handleImageUpload = (event) => {
     const files = event.target.files
     if (!files?.length) {
@@ -4533,6 +4910,7 @@ function MedicalImageChatPage() {
     }
 
     Array.from(files).forEach((file) => {
+      const requestId = createRequestId()
       const reader = new FileReader()
       reader.onload = (loadEvent) => {
         const imageUrl = loadEvent.target?.result
@@ -4543,7 +4921,8 @@ function MedicalImageChatPage() {
         setMessages((current) => [
           ...current,
           {
-            id: createRequestId(),
+            id: buildImageMessageId(requestId),
+            requestId,
             role: 'doctor-message',
             type: 'image',
             content: imageUrl,
@@ -4554,6 +4933,7 @@ function MedicalImageChatPage() {
 
         sendSocketPayload({
           ...buildBasePayload(),
+          requestId,
           type: 'image',
           imageData: imageUrl,
           imageType,
@@ -4563,6 +4943,10 @@ function MedicalImageChatPage() {
     })
 
     event.target.value = ''
+  }
+
+  const openUploadDialog = () => {
+    uploadInputRef.current?.click()
   }
 
   const sendMessage = () => {
@@ -4686,9 +5070,16 @@ function MedicalImageChatPage() {
     }
   }
 
-  const generateReport = async () => {
-    const message = getConfirmedResultMessage()
+  const generateReport = async (messageId = '') => {
+    const message = messageId
+      ? messages.find((item) => item.id === messageId && item.type === 'ai_result')
+      : getConfirmedResultMessage()
     if (!message) {
+      return
+    }
+
+    if (!message.confirmed) {
+      window.alert('请先确认当前分析结果，再生成报表。')
       return
     }
 
@@ -4703,7 +5094,7 @@ function MedicalImageChatPage() {
       return
     }
 
-    setGeneratingReport(true)
+    setGeneratingReportMessageId(message.id)
     try {
       await metricApi.createReport(reportPayload)
       setMessages((current) => [
@@ -4722,7 +5113,7 @@ function MedicalImageChatPage() {
     } catch (error) {
       window.alert(error.message || '生成报表失败。')
     } finally {
-      setGeneratingReport(false)
+      setGeneratingReportMessageId('')
     }
   }
 
@@ -4735,7 +5126,7 @@ function MedicalImageChatPage() {
     setMessages([])
     setLoading(false)
     setConfirmedResultMessageId('')
-    setGeneratingReport(false)
+    setGeneratingReportMessageId('')
 
     try {
       await metricApi.clearConversationHistory(getConversationId(), getHospitalId())
@@ -4748,6 +5139,7 @@ function MedicalImageChatPage() {
   }
 
   const hasConfirmedResult = Boolean(getConfirmedResultMessage())
+  const isGeneratingAnyReport = Boolean(generatingReportMessageId)
 
   return (
     <section className="chat-page">
@@ -4770,90 +5162,296 @@ function MedicalImageChatPage() {
             </div>
           </div>
 
-          {messages.map((message) => (
-            <div key={message.id} className={`message-row ${message.role === 'doctor-message' ? 'doctor' : message.role === 'ai-message' ? 'ai' : 'system'}`}>
-              <div className={`message-bubble ${message.type === 'ai_result' ? 'ai-result' : message.role === 'doctor-message' ? 'doctor' : message.role === 'ai-message' ? 'ai' : 'system'}`}>
-                {message.type === 'image' ? (
-                  <div className="image-message">
-                    <img src={message.content} alt="医学影像" />
-                    <small>{message.imageType} · {message.imageDate}</small>
-                  </div>
-                ) : message.type === 'ai_result' ? (
-                  <div className="ai-result-card">
-                    <div className="ai-result-header">
-                      <div>
-                        <h3>AI 分析结果</h3>
-                        <p>{message.structuredPayload?.summary || message.content}</p>
-                      </div>
-                      <div className="ai-result-meta">
-                        <span>{message.structuredPayload?.analysisModeLabel || '结构化分析'}</span>
-                        <span>置信度 {message.confidence != null ? `${message.confidence}%` : '未提供'}</span>
-                      </div>
+          {messages.map((message) => {
+            const linkedImage = message.type === 'ai_result' ? findReferenceImageForResult(message) : null
+            const highlightRegions = Array.isArray(message.structuredPayload?.highlightRegions)
+              ? message.structuredPayload.highlightRegions
+              : []
+            const highlightLegend = getHighlightLegendItems(message.structuredPayload)
+            const hasImagePreview = Boolean(linkedImage)
+            const hasHighlightDetails = Boolean(highlightRegions.length || highlightLegend.length)
+            const glowFilterId = `highlightGlow-${message.id}`
+
+            return (
+              <div key={message.id} className={`message-row ${message.role === 'doctor-message' ? 'doctor' : message.role === 'ai-message' ? 'ai' : 'system'}`}>
+                <div className={`message-bubble ${message.type === 'ai_result' ? 'ai-result' : message.role === 'doctor-message' ? 'doctor' : message.role === 'ai-message' ? 'ai' : 'system'}`}>
+                  {message.type === 'image' ? (
+                    <div className="image-message">
+                      <img src={message.content} alt="医学影像" />
+                      <small>{message.imageType} · {message.imageDate}</small>
                     </div>
-                    {message.structuredPayload?.keyIndicators?.length ? (
-                      <div className="metric-grid">
-                        {message.structuredPayload.keyIndicators.map((indicator, index) => (
-                          <div key={`${message.id}-${indicator.name}-${index}`} className="metric-card">
-                            <span>{indicator.name}</span>
-                            <strong>{indicator.value}</strong>
-                            {indicator.unit ? <small>{indicator.unit}</small> : null}
-                            {indicator.interpretation ? <small>{indicator.interpretation}</small> : null}
+                  ) : message.type === 'ai_result' ? (
+                    <div className="ai-result-card">
+                      <div className="ai-result-header">
+                        <div>
+                          <h3>AI 分析结果</h3>
+                          <p>{message.structuredPayload?.summary || message.content}</p>
+                        </div>
+                        <div className="ai-result-meta">
+                          <span>{message.structuredPayload?.analysisModeLabel || '结构化分析'}</span>
+                          <span>置信度 {message.confidence != null ? `${message.confidence}%` : '未提供'}</span>
+                        </div>
+                      </div>
+                      {hasImagePreview || hasHighlightDetails ? (
+                        <div className="highlight-visual-panel">
+                          {linkedImage ? (
+                            <div className="highlight-preview-shell">
+                              <div className="highlight-preview-meta">
+                                <strong>原图标注预览</strong>
+                                <small>
+                                  {highlightRegions.length
+                                    ? '高亮颜色直接叠加在上传影像上，颜色越靠前表示复核优先级越高。'
+                                    : '当前结果未生成可视高亮，但这里会保留原始上传影像用于对照。'}
+                                </small>
+                              </div>
+                              <div className="highlight-preview">
+                                <img src={linkedImage} alt="病灶高亮预览" />
+                                {highlightRegions.length ? (
+                                  <svg
+                                    className="highlight-svg-layer"
+                                    viewBox="0 0 100 100"
+                                    preserveAspectRatio="none"
+                                    aria-hidden="true"
+                                  >
+                                    <defs>
+                                      <filter id={glowFilterId} x="-40%" y="-40%" width="180%" height="180%">
+                                        <feGaussianBlur stdDeviation="1.35" result="softGlow" />
+                                        <feMerge>
+                                          <feMergeNode in="softGlow" />
+                                          <feMergeNode in="SourceGraphic" />
+                                        </feMerge>
+                                      </filter>
+                                    </defs>
+                                    {highlightRegions.map((region, index) => {
+                                      const visual = buildRegionVisual(region, index)
+                                      return (
+                                        <g key={`${message.id}-${region.id}`} className="highlight-svg-region">
+                                          <g transform={`rotate(${visual.rotationDegrees} ${visual.centerX} ${visual.centerY})`} filter={`url(#${glowFilterId})`}>
+                                            <path
+                                              d={visual.outerPath}
+                                              fill={hexToRgba(region.colorHex, 0.36)}
+                                              stroke={hexToRgba(region.colorHex, 0.9)}
+                                              strokeWidth="0.75"
+                                              className="highlight-svg-shape"
+                                            />
+                                            <path
+                                              d={visual.innerPath}
+                                              fill={hexToRgba(region.colorHex, 0.22)}
+                                              stroke={hexToRgba(region.colorHex, 0.48)}
+                                              strokeWidth="0.42"
+                                              className="highlight-svg-shape-inner"
+                                            />
+                                          </g>
+                                          <polyline
+                                            points={visual.label.linePoints}
+                                            fill="none"
+                                            stroke={hexToRgba(region.colorHex, 0.88)}
+                                            strokeWidth="0.48"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            className="highlight-svg-callout-line"
+                                          />
+                                          <rect
+                                            x={visual.label.x}
+                                            y={visual.label.y}
+                                            width={visual.label.width}
+                                            height={visual.label.height}
+                                            rx="2.8"
+                                            fill="rgba(2, 6, 23, 0.42)"
+                                            stroke={hexToRgba(region.colorHex, 0.46)}
+                                            strokeWidth="0.22"
+                                            className="highlight-svg-label-box"
+                                          />
+                                          <text
+                                            x={visual.label.x + 1.6}
+                                            y={visual.label.y + 3.45}
+                                            className="highlight-svg-label-text"
+                                          >
+                                            <tspan fill={region.colorHex}>{visual.label.title}</tspan>
+                                            <tspan
+                                              x={visual.label.x + 1.6}
+                                              dy="3.05"
+                                              fill="rgba(255,255,255,0.92)"
+                                              className="highlight-svg-label-subtext"
+                                            >
+                                              {visual.label.subtitle}
+                                            </tspan>
+                                          </text>
+                                        </g>
+                                      )
+                                    })}
+                                  </svg>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
+                          <div className="highlight-detail-panel">
+                            <div className="result-list-block compact">
+                              <h4>颜色声明</h4>
+                              {highlightLegend.length ? (
+                                <div className="highlight-legend-list">
+                                  {highlightLegend.map((item, index) => (
+                                    <div key={`${message.id}-legend-${item.colorHex}-${index}`} className="highlight-legend-item">
+                                      <span
+                                        className="highlight-color-chip"
+                                        style={{ backgroundColor: item.colorHex }}
+                                        aria-hidden="true"
+                                      />
+                                      <div>
+                                        <strong>{item.colorName}</strong>
+                                        <p>{item.meaning}</p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="highlight-empty-note">当前结果未输出颜色图例。</p>
+                              )}
+                            </div>
+                            <div className="result-list-block compact">
+                              <h4>标注解释</h4>
+                              {highlightRegions.length ? (
+                                <div className="highlight-region-list">
+                                  {highlightRegions.map((region) => (
+                                    <article
+                                      key={`${message.id}-${region.id}-detail`}
+                                      className="highlight-region-card"
+                                      style={{ borderColor: hexToRgba(region.colorHex, 0.3) }}
+                                    >
+                                      <div className="highlight-region-card-header">
+                                        <span
+                                          className="highlight-region-badge"
+                                          style={{
+                                            backgroundColor: hexToRgba(region.colorHex, 0.16),
+                                            color: region.colorHex,
+                                          }}
+                                        >
+                                          {region.colorName}{region.label}
+                                        </span>
+                                        <strong>{region.location}</strong>
+                                      </div>
+                                      <strong className="highlight-region-title">{region.annotationTitle}</strong>
+                                      <p>{region.annotationMeaning || region.note || '已生成区域说明。'}</p>
+                                      <small>
+                                        {region.estimatedSizeMm != null ? `范围 ${region.estimatedSizeMm} mm` : '范围未提供'}
+                                        {' · '}
+                                        覆盖 {region.coveragePercent}%
+                                        {region.severity ? ` · ${region.severity}` : ''}
+                                        {region.confidence != null ? ` · 置信度 ${region.confidence}%` : ''}
+                                      </small>
+                                    </article>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="highlight-empty-note">当前分析未识别出可直接高亮渲染的区域。</p>
+                              )}
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    ) : null}
-                    {message.structuredPayload?.findings?.length ? (
-                      <div className="result-list-block">
-                        <h4>主要发现</h4>
-                        <ul>
-                          {message.structuredPayload.findings.map((item) => (
-                            <li key={`${message.id}-${item}`}>{item}</li>
+                        </div>
+                      ) : null}
+                      {message.structuredPayload?.keyIndicators?.length ? (
+                        <div className="metric-grid">
+                          {message.structuredPayload.keyIndicators.map((indicator, index) => (
+                            <div key={`${message.id}-${indicator.name}-${index}`} className="metric-card">
+                              <span>{indicator.name}</span>
+                              <strong>{indicator.value}</strong>
+                              {indicator.unit ? <small>{indicator.unit}</small> : null}
+                              {indicator.interpretation ? <small>{indicator.interpretation}</small> : null}
+                            </div>
                           ))}
-                        </ul>
+                        </div>
+                      ) : null}
+                      {message.structuredPayload?.findings?.length ? (
+                        <div className="result-list-block">
+                          <h4>主要发现</h4>
+                          <ul>
+                            {message.structuredPayload.findings.map((item) => (
+                              <li key={`${message.id}-${item}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {message.structuredPayload?.recommendations?.length ? (
+                        <div className="result-list-block">
+                          <h4>处理建议</h4>
+                          <ul>
+                            {message.structuredPayload.recommendations.map((item) => (
+                              <li key={`${message.id}-${item}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {message.structuredPayload?.limitations?.length ? (
+                        <div className="result-list-block">
+                          <h4>结果声明</h4>
+                          <ul>
+                            {message.structuredPayload.limitations.map((item) => (
+                              <li key={`${message.id}-${item}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {message.structuredPayload?.conclusion ? (
+                        <div className="result-list-block">
+                          <h4>综合结论</h4>
+                          <p>{message.structuredPayload.conclusion}</p>
+                        </div>
+                      ) : null}
+                      {message.structuredPayload?.reportContent ? (
+                        <div className="result-list-block">
+                          <div className="report-preview-header">
+                            <h4>报表预览</h4>
+                            <small>生成后的 PDF 会包含高亮附图、颜色说明和详细明细。</small>
+                          </div>
+                          <pre className="report-preview">{message.structuredPayload.reportContent}</pre>
+                        </div>
+                      ) : null}
+                      <div className="result-card-actions">
+                        <span>
+                          {message.confirmed
+                            ? '分析结果已保存，可继续上传复查影像，新的分析不会覆盖当前已确认结果。'
+                            : message.persistableAnalysis
+                              ? '可保存到分析结果管理'
+                              : '当前结果不含可保存的结构化数据'}
+                        </span>
+                        <div className="result-card-action-buttons">
+                          <button
+                            type="button"
+                            className="button button-primary small"
+                            disabled={message.confirmed || message.saving || !message.persistableAnalysis}
+                            onClick={() => confirmResult(message.id)}
+                          >
+                            {message.confirmed ? '已确认' : message.saving ? '保存中...' : '确认结果'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary small"
+                            disabled={!message.confirmed || generatingReportMessageId === message.id || !message.structuredPayload?.report}
+                            onClick={() => generateReport(message.id)}
+                          >
+                            {message.reportSaved
+                              ? '查看报表'
+                              : generatingReportMessageId === message.id
+                                ? '报表生成中...'
+                                : '生成报表'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary small"
+                            onClick={openUploadDialog}
+                          >
+                            继续上传复查影像
+                          </button>
+                        </div>
                       </div>
-                    ) : null}
-                    {message.structuredPayload?.recommendations?.length ? (
-                      <div className="result-list-block">
-                        <h4>处理建议</h4>
-                        <ul>
-                          {message.structuredPayload.recommendations.map((item) => (
-                            <li key={`${message.id}-${item}`}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {message.structuredPayload?.conclusion ? (
-                      <div className="result-list-block">
-                        <h4>综合结论</h4>
-                        <p>{message.structuredPayload.conclusion}</p>
-                      </div>
-                    ) : null}
-                    {message.structuredPayload?.reportContent ? (
-                      <div className="result-list-block">
-                        <h4>报表预览</h4>
-                        <pre className="report-preview">{message.structuredPayload.reportContent}</pre>
-                      </div>
-                    ) : null}
-                    <div className="result-card-actions">
-                      <span>
-                        {message.confirmed ? '分析结果已保存' : message.persistableAnalysis ? '可保存到分析结果管理' : '当前结果不含可保存的结构化数据'}
-                      </span>
-                      <button
-                        type="button"
-                        className="button button-primary small"
-                        disabled={message.confirmed || message.saving || !message.persistableAnalysis}
-                        onClick={() => confirmResult(message.id)}
-                      >
-                        {message.confirmed ? '已确认' : message.saving ? '保存中...' : '确认结果'}
-                      </button>
                     </div>
-                  </div>
-                ) : (
-                  <div className="text-message">{message.content}</div>
-                )}
+                  ) : (
+                    <div className="text-message">{message.content}</div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
 
           {loading ? (
             <div className="message-row ai">
@@ -4865,7 +5463,7 @@ function MedicalImageChatPage() {
         <div className="chat-toolbar">
           <label className="button button-secondary upload-button">
             上传影像
-            <input type="file" accept="image/*" hidden multiple onChange={handleImageUpload} />
+            <input ref={uploadInputRef} type="file" accept="image/*" hidden multiple onChange={handleImageUpload} />
           </label>
           <select value={imageType} onChange={(event) => setImageType(event.target.value)}>
             <option value="XRAY">X射线</option>
@@ -4875,6 +5473,11 @@ function MedicalImageChatPage() {
             <option value="OTHER">其他</option>
           </select>
         </div>
+        {hasConfirmedResult ? (
+          <div className="follow-up-hint">
+            已确认结果仍会保留在当前患者会话中，你可以直接继续上传复查影像并生成新的分析轮次。
+          </div>
+        ) : null}
 
         <div className="chat-input-row">
           <input
@@ -4895,8 +5498,11 @@ function MedicalImageChatPage() {
       </div>
 
       <div className="bottom-action-bar">
-        <button type="button" className="button button-primary" disabled={!hasConfirmedResult || generatingReport} onClick={generateReport}>
-          {generatingReport ? '报表保存中...' : '生成报表'}
+        <button type="button" className="button button-secondary" onClick={openUploadDialog}>
+          继续上传影像
+        </button>
+        <button type="button" className="button button-primary" disabled={!hasConfirmedResult || isGeneratingAnyReport} onClick={() => generateReport()}>
+          {isGeneratingAnyReport ? '报表保存中...' : '生成当前已确认报表'}
         </button>
         <button type="button" className="button button-secondary" onClick={clearChat}>
           清空聊天

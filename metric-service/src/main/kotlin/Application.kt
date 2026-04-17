@@ -1,14 +1,19 @@
-package com.example
-
 import ai.koog.ktor.Koog
 import ai.koog.prompt.executor.clients.deepseek.DeepSeekModels
 import ai.koog.prompt.llm.LLMProvider
+import com.example.configureHTTP
+import com.example.configureRouting
+import com.example.configureSecurity
+import com.example.configureSerialization
+import com.example.configureWebSockets
+import com.example.resolveDeepSeekSettings
 import io.ktor.server.application.*
+import io.ktor.server.netty.EngineMain
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 fun main(args: Array<String>) {
-    io.ktor.server.netty.EngineMain.main(args)
+    EngineMain.main(args)
 }
 
 fun Application.module() {

@@ -42,6 +42,10 @@ class MedicalImageToolChainTest {
                 assertEquals("张三", payload.analysis.patientName)
                 assertIs<MetricDto.XRayMetric>(payload.analysis.metrics)
                 assertTrue(payload.keyIndicators.isNotEmpty())
+                assertTrue(payload.highlightRegions.isNotEmpty())
+                assertTrue(payload.highlightLegend.isNotEmpty())
+                assertEquals("红色", payload.highlightRegions.first().colorName)
+                assertTrue(payload.highlightRegions.first().contour.isNotEmpty())
             } finally {
                 Files.deleteIfExists(imagePath)
             }
@@ -74,6 +78,7 @@ class MedicalImageToolChainTest {
                 assertEquals("DATA_URL", payload.source.sourceType)
                 assertEquals("王五", payload.analysis.patientName)
                 assertTrue(payload.summary.contains("像素级分析"))
+                assertTrue(payload.highlightRegions.isNotEmpty())
             } finally {
                 Files.deleteIfExists(imagePath)
             }
@@ -116,6 +121,13 @@ class MedicalImageToolChainTest {
                 assertEquals("%PDF-", String(headerBytes, StandardCharsets.ISO_8859_1))
                 assertContains(payload.reportContent, "李四")
                 assertContains(payload.reportContent, "关键指标")
+                assertContains(payload.reportContent, "影像高亮附图")
+                assertContains(payload.reportContent, "病灶高亮说明")
+                assertContains(payload.reportContent, "高亮图例")
+                assertContains(payload.reportContent, "详细信息")
+                assertTrue(payload.highlightRegions.isNotEmpty())
+                assertTrue(payload.highlightLegend.isNotEmpty())
+                assertTrue(payload.highlightRegions.first().contour.isNotEmpty())
             } finally {
                 Files.deleteIfExists(imagePath)
                 reportPath?.let { Files.deleteIfExists(it) }

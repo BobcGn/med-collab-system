@@ -7,10 +7,17 @@ import dto.MetricDto
 import dto.ReportDto
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.serializer
+import java.awt.image.BufferedImage
+import java.net.URI
+import java.net.URLDecoder
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.time.LocalDateTime
+import java.util.Base64
 import java.util.UUID
+import javax.imageio.ImageIO
+import kotlin.math.roundToInt
 
 /**
  * 报表生成工具
@@ -40,17 +47,20 @@ object ReportGenerateTool : Tool<ReportGenerateTool.Args, String>() {
             val generatedAt = LocalDateTime.now()
             val reportId = "REP-${UUID.randomUUID()}"
             val conclusion = buildConclusion(analysisPayload)
+            val reportPreviewImage = buildReportPreviewImage(analysisPayload)
             val reportContent = renderReport(
                 reportId = reportId,
                 payload = analysisPayload,
                 generatedAt = generatedAt,
                 conclusion = conclusion,
+                reportPreviewEmbedded = reportPreviewImage != null,
             )
 
             val reportPath = writeReportFile(
                 reportId = reportId,
                 patientId = analysisPayload.analysis.patientId,
                 content = reportContent,
+                reportPreviewImage = reportPreviewImage,
             )
             val fileSize = Files.size(reportPath)
             val report = ReportDto.ReportComplete(
@@ -83,6 +93,8 @@ object ReportGenerateTool : Tool<ReportGenerateTool.Args, String>() {
                 findings = analysisPayload.findings,
                 conclusion = conclusion,
                 recommendations = analysisPayload.recommendations,
+                highlightRegions = analysisPayload.highlightRegions,
+                highlightLegend = analysisPayload.highlightLegend,
                 limitations = analysisPayload.limitations,
                 reportContent = reportContent,
             )
@@ -142,6 +154,8 @@ private fun parseAnalysisPayload(rawAnalysis: String): MedicalImageAnalysisPaylo
             findings = listOf("输入结果为兼容模式转换，已根据结构化指标补齐报表上下文。"),
             summary = "已根据结构化分析指标生成兼容报表。",
             recommendations = listOf("建议后续统一切换到新的结构化影像分析输出。"),
+            highlightRegions = emptyList(),
+            highlightLegend = emptyList(),
             limitations = listOf("当前输入不包含原始影像源信息。"),
         )
     }
@@ -196,28 +210,32 @@ private fun buildConclusion(payload: MedicalImageAnalysisPayload): String {
         return "本报告基于影像元数据生成，未读取到原始像素，结论仅用于流程联调和数据完整性确认。"
     }
 
+    val highlightSuffix = payload.highlightRegions.firstOrNull()?.let { region ->
+        "主病灶已以${region.colorName}${region.label}高亮标注。"
+    } ?: "当前未生成彩色高亮区域。"
+
     return when (val metrics = payload.analysis.metrics) {
         is MetricDto.CTMetric ->
-            "CT 指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的可疑区域，密度 ${metrics.density} HU-like，综合风险 ${metrics.severity}。"
+            "CT 指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的可疑区域，密度 ${metrics.density} HU-like，综合风险 ${metrics.severity}。$highlightSuffix"
 
         is MetricDto.MRIMetric ->
-            "MRI 指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的 ${metrics.signalIntensity} 区域，组织特征表现为 ${metrics.tissueCharacteristics}。"
+            "MRI 指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的 ${metrics.signalIntensity} 区域，组织特征表现为 ${metrics.tissueCharacteristics}。$highlightSuffix"
 
         is MetricDto.XRayMetric ->
-            "X 光指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的 ${metrics.opacity}，骨结构评价为 ${metrics.boneStructure}。"
+            "X 光指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的 ${metrics.opacity}，骨结构评价为 ${metrics.boneStructure}。$highlightSuffix"
 
         is MetricDto.UltrasoundMetric ->
-            "超声指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的 ${metrics.echogenicity} 区域，血流表现为 ${metrics.bloodFlow}。"
+            "超声指标提示 ${metrics.location} 存在约 ${metrics.size} mm 的 ${metrics.echogenicity} 区域，血流表现为 ${metrics.bloodFlow}。$highlightSuffix"
 
         is MetricDto.GeneralMetric ->
-            "当前影像已输出通用指标 ${metrics.name}，结果 ${metrics.value}${metrics.unit.orEmpty()}。"
+            "当前影像已输出通用指标 ${metrics.name}，结果 ${metrics.value}${metrics.unit.orEmpty()}。$highlightSuffix"
 
         is MetricDto.MetricCollection -> {
             val firstMetric = metrics.metrics.firstOrNull() as? MetricDto.GeneralMetric
             if (firstMetric != null) {
-                "当前影像已输出 ${metrics.metrics.size} 项通用指标，其中 ${firstMetric.name} 为 ${firstMetric.value}${firstMetric.unit.orEmpty()}。"
+                "当前影像已输出 ${metrics.metrics.size} 项通用指标，其中 ${firstMetric.name} 为 ${firstMetric.value}${firstMetric.unit.orEmpty()}。$highlightSuffix"
             } else {
-                "当前影像已输出 ${metrics.metrics.size} 项结构化指标。"
+                "当前影像已输出 ${metrics.metrics.size} 项结构化指标。$highlightSuffix"
             }
         }
     }
@@ -228,11 +246,16 @@ private fun renderReport(
     payload: MedicalImageAnalysisPayload,
     generatedAt: LocalDateTime,
     conclusion: String,
+    reportPreviewEmbedded: Boolean,
 ): String {
     val sourceSection = buildSourceSection(payload.source)
     val indicatorSection = buildIndicatorsSection(payload.keyIndicators)
     val findingSection = buildBulletSection(payload.findings)
+    val reportFigureSection = buildReportFigureSection(payload, reportPreviewEmbedded)
+    val highlightSection = buildHighlightRegionsSection(payload.highlightRegions)
+    val highlightLegendSection = buildHighlightLegendSection(payload.highlightLegend)
     val recommendationSection = buildNumberedSection(payload.recommendations)
+    val detailSection = buildDetailSection(payload, reportPreviewEmbedded)
     val limitationSection = if (payload.limitations.isEmpty()) {
         ""
     } else {
@@ -270,16 +293,23 @@ private fun renderReport(
         |## 关键发现
         |$findingSection
         |
+        |## 影像高亮附图
+        |$reportFigureSection
+        |
+        |## 病灶高亮说明
+        |$highlightSection
+        |
+        |## 高亮图例
+        |$highlightLegendSection
+        |
         |## 结论
         |$conclusion
         |
         |## 建议
         |$recommendationSection
         |
-        |$limitationSection## 结构化状态
-        |- 分析状态: ${payload.analysis.status}
-        |- 分析模式: ${payload.analysisMode}
-        |- 结果可信度: ${payload.keyIndicators.firstOrNull { it.name == "结果可信度" }?.value ?: "N/A"}%
+        |$limitationSection## 详细信息
+        |$detailSection
         |
     """.trimMargin()
 }
@@ -324,6 +354,57 @@ private fun buildIndicatorsSection(indicators: List<IndicatorItem>): String {
     }
 }
 
+private fun buildHighlightRegionsSection(regions: List<HighlightRegion>): String {
+    if (regions.isEmpty()) {
+        return "- 本次未生成需要声明的彩色高亮区域。"
+    }
+
+    val lines = mutableListOf(
+        "- 共标记 ${regions.size} 个可疑区域，结果图中按优先级以 ${regions.joinToString("、") { "${it.colorName}${it.label}" }} 高亮。",
+    )
+    lines += regions.map { region ->
+        "- ${region.colorName}${region.label}（${region.annotationTitle}）: ${region.annotationMeaning} 估计范围 ${region.estimatedSizeMm} mm，覆盖 ${region.coveragePercent}%，风险 ${region.severity}，置信度 ${round1(region.confidence * 100.0)}%。"
+    }
+    return lines.joinToString("\n")
+}
+
+private fun buildReportFigureSection(
+    payload: MedicalImageAnalysisPayload,
+    reportPreviewEmbedded: Boolean,
+): String {
+    if (payload.analysisMode != "PIXEL") {
+        return buildBulletSection(
+            listOf(
+                "当前仅完成元数据级分析，未读取原始像素，因此报表不嵌入带标注影像。",
+                "如需在报表内展示彩色高亮影像，请提供可读取像素的原始图片或 DICOM 栅格数据。",
+            ),
+        )
+    }
+
+    val lines = mutableListOf(
+        if (reportPreviewEmbedded) {
+            "报表已嵌入原始上传影像，并叠加轮廓高亮、标签和颜色说明。"
+        } else {
+            "当前未能嵌入原始上传影像，以下仍保留文字化高亮说明用于复核。"
+        },
+        "颜色与“高亮图例”保持一致，轮廓填充表示可疑范围，描边和标签用于定位与优先级提示。",
+    )
+    payload.highlightRegions.firstOrNull()?.let { region ->
+        lines += "首要关注区域为 ${region.colorName}${region.label}，定位于 ${region.location}，说明为 ${region.annotationTitle}。"
+    }
+    return buildBulletSection(lines)
+}
+
+private fun buildHighlightLegendSection(legend: List<HighlightLegendItem>): String {
+    if (legend.isEmpty()) {
+        return "- 未生成颜色图例。"
+    }
+
+    return legend.joinToString("\n") { item ->
+        "- [${item.colorHex}] ${item.colorName}: ${item.meaning}"
+    }
+}
+
 private fun buildBulletSection(items: List<String>): String {
     if (items.isEmpty()) {
         return "- 无"
@@ -338,10 +419,106 @@ private fun buildNumberedSection(items: List<String>): String {
     return items.mapIndexed { index, item -> "${index + 1}. $item" }.joinToString("\n")
 }
 
-private fun writeReportFile(reportId: String, patientId: String, content: String): Path {
+private fun buildDetailSection(
+    payload: MedicalImageAnalysisPayload,
+    reportPreviewEmbedded: Boolean,
+): String {
+    val confidenceValue = payload.keyIndicators.firstOrNull { it.name == "结果可信度" }?.value ?: "N/A"
+    val lines = mutableListOf(
+        "- 分析状态: ${payload.analysis.status}",
+        "- 分析模式: ${payload.analysisMode}",
+        "- 报表附图: ${if (reportPreviewEmbedded) "已嵌入带高亮原图" else "未嵌入带高亮原图"}",
+        "- 原始像素: ${if (payload.source.rasterDataAvailable) "可读取" else "不可读取"}",
+        "- 高亮区域数: ${payload.highlightRegions.size}",
+        "- 首要高亮: ${payload.highlightRegions.firstOrNull()?.let { "${it.colorName}${it.label}" } ?: "未生成"}",
+        "- 结果可信度: $confidenceValue${if (confidenceValue == "N/A") "" else "%"}",
+        "- 影像来源类型: ${payload.source.sourceType}",
+        "- 影像格式: ${payload.source.format ?: "N/A"}",
+        "- MIME 类型: ${payload.source.mimeType ?: "N/A"}",
+    )
+    if (payload.source.width != null && payload.source.height != null) {
+        lines += "- 图像尺寸: ${payload.source.width} x ${payload.source.height} px"
+    }
+    payload.source.fileSizeBytes?.let { lines += "- 文件大小: ${it} B" }
+    return lines.joinToString("\n")
+}
+
+private fun round1(value: Double): Double {
+    return (value * 10.0).roundToInt() / 10.0
+}
+
+private fun writeReportFile(
+    reportId: String,
+    patientId: String,
+    content: String,
+    reportPreviewImage: BufferedImage?,
+): Path {
     return writeReportPdf(
         reportId = reportId,
         patientId = patientId,
         content = content,
+        reportPreviewImage = reportPreviewImage,
     )
+}
+
+private fun buildReportPreviewImage(payload: MedicalImageAnalysisPayload): BufferedImage? {
+    if (payload.analysisMode != "PIXEL") {
+        return null
+    }
+
+    val baseImage = loadReportSourceImage(payload.imagePath) ?: return null
+    return buildReportHighlightPreview(
+        baseImage = baseImage,
+        regions = payload.highlightRegions,
+        legend = payload.highlightLegend,
+    )
+}
+
+private fun loadReportSourceImage(reference: String): BufferedImage? {
+    val normalized = reference.trim().removeSurrounding("\"")
+    if (normalized.isBlank() || normalized.startsWith("inline-image://", ignoreCase = true)) {
+        return null
+    }
+
+    if (normalized.startsWith("data:", ignoreCase = true)) {
+        return runCatching { decodeReportDataUrl(normalized) }.getOrNull()
+    }
+
+    val path = runCatching { resolveReportSourcePath(normalized) }.getOrNull() ?: return null
+    if (!Files.exists(path) || !Files.isReadable(path)) {
+        return null
+    }
+
+    return runCatching {
+        Files.newInputStream(path).use { ImageIO.read(it) }
+    }.getOrNull()
+}
+
+private fun decodeReportDataUrl(reference: String): BufferedImage? {
+    val header = reference.substringBefore(',')
+    val payload = reference.substringAfter(',', "")
+    if (payload.isBlank()) {
+        return null
+    }
+
+    val bytes = if (header.contains(";base64", ignoreCase = true)) {
+        Base64.getDecoder().decode(payload)
+    } else {
+        URLDecoder.decode(payload, Charsets.UTF_8).toByteArray(Charsets.UTF_8)
+    }
+    return bytes.inputStream().use { ImageIO.read(it) }
+}
+
+private fun resolveReportSourcePath(reference: String): Path {
+    return try {
+        if (reference.startsWith("file://", ignoreCase = true)) {
+            Path.of(URI(reference))
+        } else {
+            Path.of(reference)
+        }
+    } catch (error: InvalidPathException) {
+        throw IllegalArgumentException("报表影像路径不合法: $reference", error)
+    } catch (error: IllegalArgumentException) {
+        throw IllegalArgumentException("报表影像路径不合法: $reference", error)
+    }
 }

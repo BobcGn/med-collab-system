@@ -28,6 +28,48 @@ internal data class IndicatorItem(
 )
 
 @Serializable
+internal data class HighlightBoundingBox(
+    val leftPercent: Double,
+    val topPercent: Double,
+    val widthPercent: Double,
+    val heightPercent: Double,
+)
+
+@Serializable
+internal data class HighlightContourPoint(
+    val xPercent: Double,
+    val yPercent: Double,
+)
+
+@Serializable
+internal data class HighlightRegion(
+    val id: String,
+    val label: String,
+    val colorName: String,
+    val colorHex: String,
+    val priority: Int,
+    val annotationTitle: String,
+    val annotationMeaning: String,
+    val location: String,
+    val severity: String,
+    val confidence: Double,
+    val coveragePercent: Double,
+    val estimatedSizeMm: Double,
+    val shape: String,
+    val rotationDegrees: Double,
+    val boundingBox: HighlightBoundingBox,
+    val contour: List<HighlightContourPoint> = emptyList(),
+    val note: String,
+)
+
+@Serializable
+internal data class HighlightLegendItem(
+    val colorName: String,
+    val colorHex: String,
+    val meaning: String,
+)
+
+@Serializable
 internal data class ImageSourceSnapshot(
     val reference: String,
     val resolvedPath: String? = null,
@@ -52,6 +94,8 @@ internal data class MedicalImageAnalysisPayload(
     val findings: List<String>,
     val summary: String,
     val recommendations: List<String>,
+    val highlightRegions: List<HighlightRegion> = emptyList(),
+    val highlightLegend: List<HighlightLegendItem> = emptyList(),
     val limitations: List<String> = emptyList(),
 )
 
@@ -67,6 +111,8 @@ internal data class GeneratedReportPayload(
     val findings: List<String>,
     val conclusion: String,
     val recommendations: List<String>,
+    val highlightRegions: List<HighlightRegion> = emptyList(),
+    val highlightLegend: List<HighlightLegendItem> = emptyList(),
     val limitations: List<String> = emptyList(),
     val reportContent: String,
 )

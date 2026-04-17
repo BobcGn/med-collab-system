@@ -1,5 +1,3 @@
-package com.example
-
 import database.table.AnalysisResults
 import database.table.MedicalImages
 import database.table.Reports
