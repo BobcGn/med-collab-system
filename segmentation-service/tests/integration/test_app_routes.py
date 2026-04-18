@@ -23,6 +23,7 @@ class AppRoutesIntegrationTestCase(unittest.TestCase):
         self._temp_dir = tempfile.TemporaryDirectory()
         self.artifacts_dir = Path(self._temp_dir.name) / "artifacts"
 
+        # Contract tests pin the mock backend so they stay lightweight and deterministic.
         os.environ["SEGMENTATION_SERVICE_INFERENCE_BACKEND"] = "mock"
         os.environ["SEGMENTATION_SERVICE_ARTIFACTS_DIR"] = str(self.artifacts_dir)
         get_settings.cache_clear()
@@ -76,4 +77,3 @@ class AppRoutesIntegrationTestCase(unittest.TestCase):
         self.assertEqual(payload["quality_gate"]["status"], "PASS")
         self.assertTrue(payload["regions"])
         self.assertTrue(payload["artifacts"]["mask_path"])
-

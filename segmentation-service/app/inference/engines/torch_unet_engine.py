@@ -72,7 +72,7 @@ class TorchUNetEngine:
             class_name="lesion",
             label=f"{prepared_input.request.image_type.lower()}-lesion",
             inference_ms=inference_ms,
-            model_note="torch_unet backend executed a real PyTorch U-Net forward pass",
+            model_note=self._build_model_note(),
         )
 
     def _resolve_device(self):  # noqa: ANN202 - Torch runtime object is backend-specific.
@@ -112,3 +112,17 @@ class TorchUNetEngine:
         self.model.load_state_dict(state_dict)
         self.weights_loaded = True
 
+    def _build_model_note(self) -> str:
+        if self.weights_loaded:
+            return "torch_unet backend executed a real PyTorch U-Net forward pass with loaded weights"
+
+        if self.settings.weights_path:
+            return (
+                "torch_unet backend executed a real PyTorch U-Net forward pass with randomly "
+                "initialized weights because the configured checkpoint was unavailable"
+            )
+
+        return (
+            "torch_unet backend executed a real PyTorch U-Net forward pass with randomly "
+            "initialized weights because no checkpoint was configured"
+        )

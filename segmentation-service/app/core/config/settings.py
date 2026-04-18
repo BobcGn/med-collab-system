@@ -53,11 +53,11 @@ class Settings(BaseModel):
     app_name: str = "segmentation-service"
     app_version: str = "0.1.0"
     api_prefix: str = "/api/v1"
-    host: str = "0.0.0.0"
-    port: int = 8091
+    host: str = "127.0.0.1"
+    port: int = 8099
     log_level: str = "INFO"
 
-    inference_backend: str = "mock"
+    inference_backend: str = "torch_unet"
     device: str = "cpu"
     request_timeout_seconds: int = 30
     probability_threshold: float = Field(default=0.5, ge=0.0, le=1.0)

@@ -61,7 +61,7 @@ scripts/quick-start.sh
 - `patient-service`: `8082`
 - `metric-service`: `8083`
 - `api-gateway`: `8088`
-- `segmentation-service`: `8091`
+- `segmentation-service`: `8099`
 - `frontend`: `5173`
 
 ## 常用启动方式
@@ -79,6 +79,8 @@ scripts/quick-start.sh --skip-build
 ```
 
 说明：如果同时启动 `segmentation-service`，此模式要求 `segmentation-service/.venv` 或 `SEGMENTATION_VENV_DIR` 已经准备好。
+
+单独在 `segmentation-service/` 下执行 `scripts/run-dev.sh` 时，脚本会先停止同一 `host/port` 上残留的旧 `uvicorn` 进程，再检查默认 `torch_unet` 后端需要的运行依赖；若缺少 `Pillow` 或 `torch`，会自动执行 `pip install -e ".[unet]"` 后再启动服务。
 
 前端以 Vite dev 模式启动：
 
@@ -106,12 +108,14 @@ scripts/quick-start.sh --segmentation-python /usr/local/bin/python3.11
 
 - `CLIENT_PORT`
   说明：前端端口，默认 `5173`
+- `SEGMENTATION_HOST`
+  说明：`segmentation-service` 监听地址，默认 `127.0.0.1`
 - `SEGMENTATION_PORT`
-  说明：`segmentation-service` 端口，默认 `8091`
+  说明：`segmentation-service` 端口，默认 `8099`
 - `SEGMENTATION_ENV`
   说明：`segmentation-service` 配置环境，默认 `local`
 - `SEGMENTATION_BACKEND`
-  说明：分割后端，默认 `mock`
+  说明：分割后端，默认 `torch_unet`
 - `SEGMENTATION_PYTHON_BIN`
   说明：用于创建和运行 `segmentation-service` 虚拟环境的 Python
 - `SEGMENTATION_VENV_DIR`
@@ -133,8 +137,8 @@ scripts/quick-start.sh --segmentation-python /usr/local/bin/python3.11
 启动完成后，可优先检查这些端点：
 
 - `http://localhost:8083/health`
-- `http://localhost:8091/health`
-- `http://localhost:8091/api/v1/models/current`
+- `http://localhost:8099/health`
+- `http://localhost:8099/api/v1/models/current`
 
 脚本日志目录：
 

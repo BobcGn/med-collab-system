@@ -10,9 +10,10 @@ BACKEND_SERVICES=("auth-service" "patient-service" "metric-service" "api-gateway
 BACKEND_PORTS=(8081 8082 8083 8088)
 
 CLIENT_PORT="${CLIENT_PORT:-5173}"
-SEGMENTATION_PORT="${SEGMENTATION_PORT:-8091}"
+SEGMENTATION_HOST="${SEGMENTATION_HOST:-127.0.0.1}"
+SEGMENTATION_PORT="${SEGMENTATION_PORT:-8099}"
 SEGMENTATION_ENV="${SEGMENTATION_ENV:-local}"
-SEGMENTATION_BACKEND="${SEGMENTATION_BACKEND:-mock}"
+SEGMENTATION_BACKEND="${SEGMENTATION_BACKEND:-torch_unet}"
 SEGMENTATION_PYTHON_BIN="${SEGMENTATION_PYTHON_BIN:-}"
 SEGMENTATION_VENV_DIR="${SEGMENTATION_VENV_DIR:-${SEGMENTATION_DIR}/.venv}"
 FRONTEND_MODE="preview"
@@ -33,15 +34,16 @@ Options:
   --skip-build               Skip npm/gradle build and only start services.
   --frontend-mode <mode>     Frontend startup mode: preview (default) or dev.
   --without-segmentation     Do not start the Python segmentation-service.
-  --segmentation-backend     Segmentation backend: mock (default) or torch_unet.
+  --segmentation-backend     Segmentation backend: torch_unet (default) or mock.
   --segmentation-python      Python executable for segmentation-service (must be >= 3.11).
   -h, --help                 Show this help.
 
 Environment:
   CLIENT_PORT                Frontend port (default: 5173).
-  SEGMENTATION_PORT          Segmentation-service port (default: 8091).
+  SEGMENTATION_HOST          Segmentation-service host (default: 127.0.0.1).
+  SEGMENTATION_PORT          Segmentation-service port (default: 8099).
   SEGMENTATION_ENV           Segmentation-service environment (default: local).
-  SEGMENTATION_BACKEND       Segmentation backend (default: mock).
+  SEGMENTATION_BACKEND       Segmentation backend (default: torch_unet).
   SEGMENTATION_PYTHON_BIN    Python executable for segmentation-service.
   SEGMENTATION_VENV_DIR      Virtualenv directory for segmentation-service.
 EOF
@@ -296,10 +298,11 @@ start_segmentation_service() {
     "${SEGMENTATION_PORT}" \
     env \
     SEGMENTATION_SERVICE_ENVIRONMENT="${SEGMENTATION_ENV}" \
+    SEGMENTATION_SERVICE_HOST="${SEGMENTATION_HOST}" \
     SEGMENTATION_SERVICE_PORT="${SEGMENTATION_PORT}" \
     SEGMENTATION_SERVICE_INFERENCE_BACKEND="${SEGMENTATION_BACKEND}" \
     "${SEGMENTATION_RUNTIME_PYTHON}" \
-    -m uvicorn app.main:app --host 0.0.0.0 --port "${SEGMENTATION_PORT}" --app-dir .
+    -m uvicorn app.main:app --host "${SEGMENTATION_HOST}" --port "${SEGMENTATION_PORT}" --app-dir .
   popd >/dev/null
 }
 

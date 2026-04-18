@@ -10,7 +10,7 @@
 - 模型信息接口
 - 单张 / 批量分割接口
 - 图像加载、预处理、后处理和质量门禁
-- `mock` 后端和 `torch_unet` 后端
+- 默认启用真实 `torch_unet` 后端，同时保留 `mock` 作为显式联调/测试降级选项
 - 从路由到 orchestrator 的完整调用链
 
 ## 推荐启动方式
@@ -41,7 +41,7 @@ source .venv/bin/activate
 pip install -e .
 ```
 
-如果需要启用真实的 Torch U-Net 后端：
+安装真实 Torch U-Net 运行依赖：
 
 ```bash
 pip install -e ".[unet]"
@@ -54,7 +54,9 @@ pip install -e ".[unet]"
 常用变量：
 
 - `SEGMENTATION_SERVICE_ENVIRONMENT=local`
-- `SEGMENTATION_SERVICE_INFERENCE_BACKEND=mock`
+- `SEGMENTATION_SERVICE_HOST=127.0.0.1`
+- `SEGMENTATION_SERVICE_INFERENCE_BACKEND=torch_unet`
+- `SEGMENTATION_SERVICE_PORT=8099`
 - `SEGMENTATION_SERVICE_MODEL_WEIGHTS_PATH=/absolute/path/to/model.pt`
 
 ### 3. 启动服务
@@ -65,10 +67,12 @@ pip install -e ".[unet]"
 scripts/run-dev.sh
 ```
 
+该脚本会优先使用当前激活的虚拟环境，其次回退到 `segmentation-service/.venv`；启动前会先停止同一 `host/port` 上残留的旧 `uvicorn` 进程，并在发现 `Pillow`、`torch` 等运行依赖缺失时自动执行 `pip install -e ".[unet]"`。
+
 或手动执行：
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8091 --app-dir .
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8099 --app-dir .
 ```
 
 ## 核心接口
@@ -93,14 +97,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8091 --app-dir .
   - 用于联调和契约测试，不依赖真实模型权重
 - `torch_unet`
   - 使用 PyTorch 2D U-Net 执行真实推理
+  - 本地默认配置即使用该后端
   - 需要安装 `.[unet]` 依赖
-  - 通常还需要配置 `SEGMENTATION_SERVICE_MODEL_WEIGHTS_PATH`
+  - 建议配置 `SEGMENTATION_SERVICE_MODEL_WEIGHTS_PATH` 以加载训练权重
+  - 若未配置权重且 `allow_random_weights=true`，仍会执行真实 U-Net 前向，但输出仅适合联调
 
 ## 运行验证
 
 启动后可检查：
 
 ```bash
-curl http://localhost:8091/health
-curl http://localhost:8091/api/v1/models/current
+curl http://localhost:8099/health
+curl http://localhost:8099/api/v1/models/current
 ```
