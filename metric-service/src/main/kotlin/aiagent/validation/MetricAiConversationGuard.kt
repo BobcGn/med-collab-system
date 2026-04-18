@@ -98,5 +98,5 @@ internal fun determineMetricAiConversationScope(
 }
 
 internal fun buildUnsupportedMetricAiPrompt(): String {
-    return "AI Agent 仅支持医疗影像分析、相关指标解读与报表生成，不提供闲聊或其他通用问答。请上传医学影像，或输入影像所见、测量指标、报告内容等相关问题。"
+    return "AI Agent 仅支持受控医疗影像分析、既有结构化结果/正式报告解读，不提供闲聊或其他通用问答。LLM 不执行分割、不生成诊断性影像结论、不改写正式结构化分析结果。请上传医学影像，或输入正式报告、影像所见、测量指标等相关问题。"
 }

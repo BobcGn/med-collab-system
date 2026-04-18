@@ -1,6 +1,7 @@
 package aiagent.tools
 
 import dto.MetricDto
+import dto.AnalysisResultDto
 import enums.ImageType
 import kotlinx.coroutines.runBlocking
 import java.awt.Color
@@ -132,6 +133,76 @@ class MedicalImageToolChainTest {
                 Files.deleteIfExists(imagePath)
                 reportPath?.let { Files.deleteIfExists(it) }
             }
+        }
+    }
+
+    @Test
+    fun `should reject unknown modality for official analysis`() {
+        runBlocking {
+            val imagePath = createSampleImage()
+
+            try {
+                val rawResult = MedicalImageAnalyzerTool.execute(
+                    MedicalImageAnalyzerTool.Args(
+                        imagePath = imagePath.toString(),
+                        imageType = ImageType.OTHER,
+                        hospitalId = "H-004",
+                        patientId = "P-004",
+                        patientName = "赵六",
+                    ),
+                )
+
+                val payload = toolJson.decodeFromString(
+                    ToolErrorResponse.serializer(),
+                    rawResult,
+                )
+
+                assertEquals("ANALYSIS_FAILED", payload.errorCode)
+                assertContains(payload.detail.orEmpty(), "未知影像模态不允许进入正式结构化分析")
+            } finally {
+                Files.deleteIfExists(imagePath)
+            }
+        }
+    }
+
+    @Test
+    fun `should reject legacy analysis payload when generating formal report`() {
+        runBlocking {
+            val legacyAnalysis = AnalysisResultDto.AnalysisResultComplete(
+                id = "ANL-LEGACY-001",
+                hospitalId = "H-005",
+                imageId = "IMG-LEGACY-001",
+                patientId = "P-005",
+                patientName = "钱七",
+                metrics = MetricDto.XRayMetric(
+                    opacity = "斑片状高密度影",
+                    size = 12.5,
+                    location = "右上肺",
+                    boneStructure = "未见明显异常",
+                    confidence = 0.92,
+                ),
+                status = "completed",
+                createdAt = "2026-04-19T10:00:00",
+                completedAt = "2026-04-19T10:00:01",
+                errorMessage = null,
+            )
+
+            val rawReport = ReportGenerateTool.execute(
+                ReportGenerateTool.Args(
+                    analysisResult = toolJson.encodeToString(
+                        AnalysisResultDto.AnalysisResultComplete.serializer(),
+                        legacyAnalysis,
+                    ),
+                ),
+            )
+
+            val payload = toolJson.decodeFromString(
+                ToolErrorResponse.serializer(),
+                rawReport,
+            )
+
+            assertEquals("REPORT_GENERATION_FAILED", payload.errorCode)
+            assertContains(payload.detail.orEmpty(), "正式报告仅接受经过校验的结构化影像分析结果")
         }
     }
 

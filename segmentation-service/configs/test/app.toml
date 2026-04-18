@@ -1,0 +1,38 @@
+[service]
+environment = "test"
+app_name = "segmentation-service"
+app_version = "0.1.0"
+
+[api]
+host = "127.0.0.1"
+port = 8092
+prefix = "/api/v1"
+
+[logging]
+level = "INFO"
+
+[inference]
+backend = "mock"
+device = "cpu"
+request_timeout_seconds = 10
+probability_threshold = 0.5
+min_region_pixels = 8
+min_confidence = 0.55
+pixel_spacing_mm = 0.7
+max_contour_points = 24
+
+[model]
+name = "unet-bootstrap"
+version = "0.1.0-test"
+weights_path = ""
+allow_random_weights = true
+input_height = 128
+input_width = 128
+in_channels = 1
+output_classes = 1
+base_channels = 16
+lesion_class_index = 0
+
+[storage]
+artifacts_dir = "var/test-artifacts"
+return_artifacts = false

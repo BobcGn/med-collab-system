@@ -21,15 +21,16 @@ fun Application.module() {
 
     /**
      * 安装Koog插件并配置DeepSeek Agent
-     * 参考文档: https://openaidoc.org/koog/ktor-plugin
+     * 当前仅为后续“结果解释类文本能力”预留，不参与影像正式分析与正式报告生成。
      */
     if (deepSeekSettings.isConfigured) {
-        log.info("DeepSeek provider configured from {}", deepSeekSettings.source)
+        log.info("DeepSeek provider configured from {} for non-diagnostic text capabilities", deepSeekSettings.source)
         install(Koog) {
             llm {
                 /**
                  * 配置DeepSeek提供商
-                 * 使用环境变量中的API密钥，确保在生产环境中正确设置
+                 * 使用环境变量中的API密钥，确保在生产环境中正确设置。
+                 * 注意：该提供商不得替代 U-Net/结构化工具生成医学分析结论。
                  */
                 deepSeek(apiKey = deepSeekSettings.apiKey.orEmpty()) {
                     baseUrl = "https://api.deepseek.com"
@@ -48,7 +49,8 @@ fun Application.module() {
 
                 /**
                  * 配置回退设置
-                 * 当请求的提供商未配置时，使用此设置
+                 * 当请求的提供商未配置时，使用此设置。
+                 * 该回退仅适用于非诊断文本能力，不适用于正式影像分析流程。
                  */
                 fallback {
                     provider = LLMProvider.DeepSeek
@@ -65,5 +67,5 @@ fun Application.module() {
     configureWebSockets()
     configureSerialization()
     configureDatabases()
-    configureRouting(deepSeekSettings)
+    configureRouting()
 }

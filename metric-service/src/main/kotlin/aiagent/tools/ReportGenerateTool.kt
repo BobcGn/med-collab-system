@@ -2,7 +2,6 @@ package aiagent.tools
 
 import ai.koog.agents.core.tools.Tool
 import ai.koog.agents.core.tools.annotations.LLMDescription
-import dto.AnalysisResultDto
 import dto.MetricDto
 import dto.ReportDto
 import kotlinx.serialization.Serializable
@@ -20,9 +19,10 @@ import javax.imageio.ImageIO
 import kotlin.math.roundToInt
 
 /**
- * 报表生成工具
- * @Input 上一步处理得到的分析结果
- * @Output 结构化报表结果
+ * 正式报告生成工具。
+ *
+ * 该工具只允许消费已经过校验的结构化影像分析结果，
+ * 不重新推理影像，不补做分析，不接受兼容模式输入直接生成正式报告。
  */
 object ReportGenerateTool : Tool<ReportGenerateTool.Args, String>() {
     @Serializable
@@ -34,7 +34,7 @@ object ReportGenerateTool : Tool<ReportGenerateTool.Args, String>() {
     override val argsSerializer = Args.serializer()
     override val resultSerializer = String.serializer()
     override val name = "报表生成工具"
-    override val description = "根据影像分析指标和患者信息生成正式报表并落盘"
+    override val description = "仅根据已校验的结构化影像分析结果生成正式报告，不重新分析影像，不改写分析结论"
 
     public override suspend fun execute(args: Args): String {
         return runCatching {
@@ -124,84 +124,11 @@ private fun parseAnalysisPayload(rawAnalysis: String): MedicalImageAnalysisPaylo
 
     return runCatching {
         toolJson.decodeFromString(MedicalImageAnalysisPayload.serializer(), rawAnalysis)
-    }.getOrElse {
-        val analysis = toolJson.decodeFromString(
-            AnalysisResultDto.AnalysisResultComplete.serializer(),
-            rawAnalysis,
+    }.getOrElse { error ->
+        throw IllegalArgumentException(
+            "正式报告仅接受经过校验的结构化影像分析结果，禁止使用兼容模式输入生成正式报告",
+            error,
         )
-        MedicalImageAnalysisPayload(
-            analysis = analysis,
-            imageType = inferImageType(analysis.metrics),
-            imagePath = "",
-            analysisMode = if (analysis.metrics is MetricDto.MetricCollection) {
-                "METADATA_ONLY"
-            } else {
-                "PIXEL"
-            },
-            source = ImageSourceSnapshot(
-                reference = "",
-                resolvedPath = null,
-                sourceType = "LEGACY_RESULT",
-                format = null,
-                mimeType = null,
-                fileSizeBytes = null,
-                width = null,
-                height = null,
-                readable = true,
-                rasterDataAvailable = false,
-            ),
-            keyIndicators = legacyIndicators(analysis.metrics),
-            findings = listOf("输入结果为兼容模式转换，已根据结构化指标补齐报表上下文。"),
-            summary = "已根据结构化分析指标生成兼容报表。",
-            recommendations = listOf("建议后续统一切换到新的结构化影像分析输出。"),
-            highlightRegions = emptyList(),
-            highlightLegend = emptyList(),
-            limitations = listOf("当前输入不包含原始影像源信息。"),
-        )
-    }
-}
-
-private fun inferImageType(metrics: MetricDto): String {
-    return when (metrics) {
-        is MetricDto.CTMetric -> "CT"
-        is MetricDto.MRIMetric -> "MRI"
-        is MetricDto.XRayMetric -> "XRAY"
-        is MetricDto.UltrasoundMetric -> "ULTRASOUND"
-        is MetricDto.GeneralMetric, is MetricDto.MetricCollection -> "OTHER"
-    }
-}
-
-private fun legacyIndicators(metrics: MetricDto): List<IndicatorItem> {
-    return when (metrics) {
-        is MetricDto.CTMetric -> listOf(
-            IndicatorItem("密度", metrics.density.toString(), "HU-like", metrics.severity),
-            IndicatorItem("异常范围", metrics.size.toString(), "mm"),
-            IndicatorItem("异常位置", metrics.location),
-        )
-
-        is MetricDto.MRIMetric -> listOf(
-            IndicatorItem("信号强度", metrics.signalIntensity),
-            IndicatorItem("异常范围", metrics.size.toString(), "mm"),
-            IndicatorItem("组织特征", metrics.tissueCharacteristics),
-        )
-
-        is MetricDto.XRayMetric -> listOf(
-            IndicatorItem("密度表现", metrics.opacity),
-            IndicatorItem("异常范围", metrics.size.toString(), "mm"),
-            IndicatorItem("骨结构", metrics.boneStructure),
-        )
-
-        is MetricDto.UltrasoundMetric -> listOf(
-            IndicatorItem("回声性", metrics.echogenicity),
-            IndicatorItem("异常范围", metrics.size.toString(), "mm"),
-            IndicatorItem("血流提示", metrics.bloodFlow),
-        )
-
-        is MetricDto.GeneralMetric -> listOf(
-            IndicatorItem(metrics.name, metrics.value.toString(), metrics.unit, metrics.referenceRange)
-        )
-
-        is MetricDto.MetricCollection -> metrics.metrics.flatMap(::legacyIndicators)
     }
 }
 

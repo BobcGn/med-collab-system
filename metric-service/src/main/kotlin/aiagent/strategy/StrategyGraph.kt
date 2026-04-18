@@ -2,9 +2,12 @@ package aiagent.strategy
 
 import ai.koog.agents.core.dsl.builder.forwardTo
 import ai.koog.agents.core.dsl.builder.strategy
-import ai.koog.agents.core.tools.ToolRegistry
+import aiagent.tools.GeneratedReportPayload
+import aiagent.tools.MedicalImageAnalysisPayload
 import aiagent.tools.MedicalImageAnalyzerTool
 import aiagent.tools.ReportGenerateTool
+import aiagent.tools.ToolErrorResponse
+import aiagent.tools.toolJson
 import enums.ImageType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
@@ -13,61 +16,94 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.time.LocalDateTime
 
+internal object ClinicalPipelineBoundaryPolicy {
+    const val analysisAuthority = "UNET_OR_DETERMINISTIC_ANALYZER_ONLY"
+    const val reportAuthority = "REPORT_TOOL_ONLY"
+    const val llmAuthority = "TEXT_EXPLANATION_ONLY"
+    const val prohibitedBehavior =
+        "LLM_MUST_NOT_SEGMENT_DIAGNOSE_REWRITE_STRUCTURED_ANALYSIS_OR_AUTHOR_OFFICIAL_REPORT"
+}
+
+internal data class ClinicalAnalysisRequest(
+    val imagePath: String,
+    val imageType: ImageType,
+    val hospitalId: String,
+    val patientId: String,
+    val patientName: String,
+    val message: String? = null,
+)
+
+private data class ValidatedClinicalAnalysisRequest(
+    val request: ClinicalAnalysisRequest,
+    val acceptedAt: String,
+    val analysisAuthority: String = ClinicalPipelineBoundaryPolicy.analysisAuthority,
+    val reportAuthority: String = ClinicalPipelineBoundaryPolicy.reportAuthority,
+    val llmAuthority: String = ClinicalPipelineBoundaryPolicy.llmAuthority,
+    val prohibitedBehavior: String = ClinicalPipelineBoundaryPolicy.prohibitedBehavior,
+)
+
+private data class StructuredClinicalAnalysis(
+    val request: ValidatedClinicalAnalysisRequest,
+    val payload: MedicalImageAnalysisPayload,
+)
+
+private data class StructuredClinicalReport(
+    val analysis: StructuredClinicalAnalysis,
+    val payload: GeneratedReportPayload,
+)
+
 /**
- * 辅助函数：解析输入参数
+ * 解析用户输入并转成受控的影像分析请求。
+ * 这里仅提取结构化字段，不允许自然语言直接改写分析结论。
  */
-fun parseInput(input: String): Map<String, Any> {
-    val inputMap = mutableMapOf<String, Any>()
+internal fun parseInput(input: String): ClinicalAnalysisRequest {
+    val extracted = mutableMapOf<String, String>()
     val jsonObject = runCatching {
         Json.parseToJsonElement(input).jsonObject
     }.getOrNull()
 
     if (jsonObject != null) {
-        val imagePath = jsonObject["imagePath"]?.jsonPrimitive?.contentOrNull
+        extracted["imagePath"] = jsonObject["imagePath"]?.jsonPrimitive?.contentOrNull
             ?: jsonObject["imageUrl"]?.jsonPrimitive?.contentOrNull
-        val imageType = jsonObject["imageType"]?.jsonPrimitive?.contentOrNull
-        val hospitalId = jsonObject["hospitalId"]?.jsonPrimitive?.contentOrNull
-        val patientId = jsonObject["patientId"]?.jsonPrimitive?.contentOrNull
-        val patientName = jsonObject["patientName"]?.jsonPrimitive?.contentOrNull
-        val message = jsonObject["message"]?.jsonPrimitive?.contentOrNull
-
-        imagePath?.takeIf { it.isNotBlank() }?.let { inputMap["imagePath"] = it }
-        imageType?.let { inputMap["imageType"] = normalizeImageType(it) }
-        hospitalId?.takeIf { it.isNotBlank() }?.let { inputMap["hospitalId"] = it }
-        patientId?.takeIf { it.isNotBlank() }?.let { inputMap["patientId"] = it }
-        patientName?.takeIf { it.isNotBlank() }?.let { inputMap["patientName"] = it }
-        message?.takeIf { it.isNotBlank() }?.let { inputMap["message"] = it }
-        return inputMap
+            ?: ""
+        extracted["imageType"] = jsonObject["imageType"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        extracted["hospitalId"] = jsonObject["hospitalId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        extracted["patientId"] = jsonObject["patientId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        extracted["patientName"] = jsonObject["patientName"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        extracted["message"] = jsonObject["message"]?.jsonPrimitive?.contentOrNull.orEmpty()
+    } else {
+        extracted["imagePath"] = parseLooseField(input, "imagePath")
+        extracted["imageType"] = parseLooseField(input, "imageType")
+        extracted["hospitalId"] = parseLooseField(input, "hospitalId")
+        extracted["patientId"] = parseLooseField(input, "patientId")
+        extracted["patientName"] = parseLooseField(input, "patientName")
+        extracted["message"] = parseLooseField(input, "message")
     }
 
-    if (input.contains("imagePath")) {
-        input.substringAfter("imagePath:").substringBefore('"').trim()
-            .takeIf { it.isNotBlank() }
-            ?.let { inputMap["imagePath"] = it }
-    }
-    if (input.contains("imageType")) {
-        val typeStr = input.substringAfter("imageType:").substringBefore('"').trim()
-        if (typeStr.isNotBlank()) {
-            inputMap["imageType"] = normalizeImageType(typeStr)
-        }
-    }
-    if (input.contains("hospitalId")) {
-        input.substringAfter("hospitalId:").substringBefore('"').trim()
-            .takeIf { it.isNotBlank() }
-            ?.let { inputMap["hospitalId"] = it }
-    }
-    if (input.contains("patientId")) {
-        input.substringAfter("patientId:").substringBefore('"').trim()
-            .takeIf { it.isNotBlank() }
-            ?.let { inputMap["patientId"] = it }
-    }
-    if (input.contains("patientName")) {
-        input.substringAfter("patientName:").substringBefore('"').trim()
-            .takeIf { it.isNotBlank() }
-            ?.let { inputMap["patientName"] = it }
+    return ClinicalAnalysisRequest(
+        imagePath = requireNotBlank(extracted["imagePath"], "影像路径不能为空"),
+        imageType = normalizeImageType(extracted["imageType"].orEmpty()),
+        hospitalId = requireNotBlank(extracted["hospitalId"], "医院ID不能为空"),
+        patientId = requireNotBlank(extracted["patientId"], "患者ID不能为空"),
+        patientName = requireNotBlank(extracted["patientName"], "患者姓名不能为空"),
+        message = extracted["message"]?.trim()?.takeIf { it.isNotEmpty() },
+    )
+}
+
+internal suspend fun executeControlledMetricReportPipeline(input: String): String {
+    val acceptedRequest = acceptClinicalAnalysisRequest(parseInput(input))
+    val analysis = runDeterministicClinicalAnalysis(acceptedRequest)
+    val report = generateControlledClinicalReport(analysis)
+    return toolJson.encodeToString(GeneratedReportPayload.serializer(), report.payload)
+}
+
+private fun parseLooseField(input: String, fieldName: String): String {
+    if (!input.contains(fieldName)) {
+        return ""
     }
 
-    return inputMap
+    val suffix = input.substringAfter("$fieldName:", "")
+    return suffix.substringBefore('"').trim()
 }
 
 private fun normalizeImageType(rawType: String): ImageType {
@@ -81,128 +117,223 @@ private fun normalizeImageType(rawType: String): ImageType {
     }
 }
 
+private fun requireNotBlank(value: String?, message: String): String {
+    return value?.trim()?.takeIf { it.isNotEmpty() } ?: throw IllegalArgumentException(message)
+}
+
+private fun acceptClinicalAnalysisRequest(request: ClinicalAnalysisRequest): ValidatedClinicalAnalysisRequest {
+    require(request.imageType != ImageType.OTHER) {
+        "当前仅支持明确模态的医疗影像分析请求，禁止在未知模态下生成正式分析结果"
+    }
+
+    return ValidatedClinicalAnalysisRequest(
+        request = request,
+        acceptedAt = LocalDateTime.now().toString(),
+    )
+}
+
+private suspend fun runDeterministicClinicalAnalysis(
+    request: ValidatedClinicalAnalysisRequest,
+): StructuredClinicalAnalysis {
+    val rawOutput = MedicalImageAnalyzerTool.execute(
+        MedicalImageAnalyzerTool.Args(
+            imagePath = request.request.imagePath,
+            imageType = request.request.imageType,
+            hospitalId = request.request.hospitalId,
+            patientId = request.request.patientId,
+            patientName = request.request.patientName,
+        ),
+    )
+
+    return StructuredClinicalAnalysis(
+        request = request,
+        payload = validateStructuredAnalysisPayload(
+            rawOutput = rawOutput,
+            request = request,
+        ),
+    )
+}
+
+private fun validateStructuredAnalysisPayload(
+    rawOutput: String,
+    request: ValidatedClinicalAnalysisRequest,
+): MedicalImageAnalysisPayload {
+    decodeToolError(rawOutput, stage = "结构化影像分析")
+
+    val payload = runCatching {
+        toolJson.decodeFromString(MedicalImageAnalysisPayload.serializer(), rawOutput)
+    }.getOrElse { error ->
+        throw IllegalStateException("结构化影像分析输出不符合契约: ${error.message}", error)
+    }
+
+    require(payload.analysis.errorMessage.isNullOrBlank()) {
+        "结构化影像分析结果包含错误信息，禁止进入正式报告阶段"
+    }
+    require(payload.analysis.hospitalId == request.request.hospitalId) {
+        "分析结果中的医院ID与请求不一致"
+    }
+    require(payload.analysis.patientId == request.request.patientId) {
+        "分析结果中的患者ID与请求不一致"
+    }
+    require(payload.analysis.patientName == request.request.patientName) {
+        "分析结果中的患者姓名与请求不一致"
+    }
+    require(payload.imageType == request.request.imageType.name) {
+        "分析结果中的影像类型与请求不一致"
+    }
+    require(payload.analysisMode == "PIXEL" || payload.analysisMode == "METADATA_ONLY") {
+        "分析结果中的 analysisMode 不受支持"
+    }
+    require(payload.summary.isNotBlank()) {
+        "分析结果缺少结构化摘要"
+    }
+    require(payload.findings.isNotEmpty()) {
+        "分析结果缺少结构化 findings"
+    }
+    require(payload.source.readable) {
+        "输入影像不可读，禁止生成正式结构化结果"
+    }
+
+    return payload
+}
+
+private suspend fun generateControlledClinicalReport(
+    analysis: StructuredClinicalAnalysis,
+): StructuredClinicalReport {
+    val rawOutput = ReportGenerateTool.execute(
+        ReportGenerateTool.Args(
+            analysisResult = toolJson.encodeToString(MedicalImageAnalysisPayload.serializer(), analysis.payload),
+        ),
+    )
+
+    return StructuredClinicalReport(
+        analysis = analysis,
+        payload = validateGeneratedReportPayload(
+            rawOutput = rawOutput,
+            analysis = analysis,
+        ),
+    )
+}
+
+private fun validateGeneratedReportPayload(
+    rawOutput: String,
+    analysis: StructuredClinicalAnalysis,
+): GeneratedReportPayload {
+    decodeToolError(rawOutput, stage = "正式报告生成")
+
+    val payload = runCatching {
+        toolJson.decodeFromString(GeneratedReportPayload.serializer(), rawOutput)
+    }.getOrElse { error ->
+        throw IllegalStateException("正式报告输出不符合契约: ${error.message}", error)
+    }
+
+    require(payload.analysis.id == analysis.payload.analysis.id) {
+        "报告引用的分析ID与结构化分析结果不一致"
+    }
+    require(payload.report.analysisIds.contains(analysis.payload.analysis.id)) {
+        "报告未绑定当前结构化分析ID"
+    }
+    require(payload.report.hospitalId == analysis.payload.analysis.hospitalId) {
+        "报告中的医院ID与结构化分析结果不一致"
+    }
+    require(payload.report.patientId == analysis.payload.analysis.patientId) {
+        "报告中的患者ID与结构化分析结果不一致"
+    }
+    require(payload.report.patientName == analysis.payload.analysis.patientName) {
+        "报告中的患者姓名与结构化分析结果不一致"
+    }
+    require(payload.report.status == "generated") {
+        "报告未处于 generated 状态，禁止作为正式报告输出"
+    }
+    require(payload.reportContent.isNotBlank()) {
+        "报告正文为空"
+    }
+
+    return payload
+}
+
+private fun decodeToolError(rawOutput: String, stage: String) {
+    val toolError = runCatching {
+        toolJson.decodeFromString(ToolErrorResponse.serializer(), rawOutput)
+    }.getOrNull() ?: return
+
+    if (toolError.errorCode.isNotBlank()) {
+        val detail = toolError.detail?.takeIf { it.isNotBlank() } ?: toolError.message
+        throw IllegalStateException("${stage}失败: $detail")
+    }
+}
+
+private fun persistStructuredClinicalReport(report: StructuredClinicalReport): String {
+    transaction {
+        println(
+            "登记正式报告: analysisAuthority=${report.analysis.request.analysisAuthority}, " +
+                "reportAuthority=${report.analysis.request.reportAuthority}, " +
+                "llmAuthority=${report.analysis.request.llmAuthority}, " +
+                "analysisId=${report.payload.analysisId}, reportId=${report.payload.report.id}"
+        )
+    }
+
+    return toolJson.encodeToString(GeneratedReportPayload.serializer(), report.payload)
+}
+
 /**
- * 医疗图像分析与生成报表策略图
- * 输入：包含影像信息的JSON字符串
- * 输出：生成的报表结果
+ * 医疗影像正式分析与正式报告策略图。
+ *
+ * 这条策略图只允许：
+ * 1. 使用确定性的结构化分析工具产出分析结果；
+ * 2. 使用正式报告工具消费结构化分析结果产出报告；
+ * 3. LLM 仅能在图外承担非诊断、非分割、非报告定稿的文本解释职责。
  */
-val metricReportStrategy = strategy<String, String>("医疗影像分析与报表生成策略"){
-    // 将影像分析和报表生成工具加入工具注册表
-    val toolRegistry = ToolRegistry{
-        tool(MedicalImageAnalyzerTool)
-        tool(ReportGenerateTool)
-    }
-
-    /**
-     * 定义子图
-     */
-    // 上传影像子图
-    val subgraphUploadImage by subgraph<String, Map<String, Any>>("上传医学影像子图") {
-        // 定义节点
-        val nodeUploadImage by node<String, Map<String, Any>>("上传影像"){ input ->
-            // 解析输入参数
-            val inputData = parseInput(input)
-            
-            // 模拟影像上传过程
-            val imageData = mapOf(
-                "imagePath" to inputData["imagePath"] as String,
-                "imageType" to inputData["imageType"] as ImageType,
-                "hospitalId" to inputData["hospitalId"] as String,
-                "patientId" to inputData["patientId"] as String,
-                "patientName" to inputData["patientName"] as String,
-                "uploadTime" to LocalDateTime.now().toString()
-            )
-            
-            imageData
-        }
-        
-        val nodeValidateImage by node<Map<String, Any>, Map<String, Any>>("验证影像"){ input ->
-            // 验证上传的医学影像
-            val imagePath = input["imagePath"] as String
-            val imageType = input["imageType"] as ImageType
-            
-            // 模拟验证过程
-            if (imagePath.isBlank()) {
-                throw IllegalArgumentException("影像路径不能为空")
-            }
-            
-            // 添加验证结果
-            input + mapOf("validated" to true, "validationTime" to LocalDateTime.now().toString())
+val metricReportStrategy = strategy<String, String>("医疗影像正式分析与正式报告策略") {
+    val intakeSubgraph by subgraph<String, ValidatedClinicalAnalysisRequest>("受控请求受理子图") {
+        val parseRequestNode by node<String, ClinicalAnalysisRequest>("解析结构化请求") { input ->
+            parseInput(input)
         }
 
-        // 定义边
-        edge(nodeUploadImage forwardTo nodeValidateImage)
+        val validateBoundaryNode by node<ClinicalAnalysisRequest, ValidatedClinicalAnalysisRequest>("强制职责边界") {
+            request ->
+            acceptClinicalAnalysisRequest(request)
+        }
+
+        edge(nodeStart forwardTo parseRequestNode)
+        edge(parseRequestNode forwardTo validateBoundaryNode)
+        edge(validateBoundaryNode forwardTo nodeFinish)
     }
 
-    // 影像分析子图
-    val subgraphAnalyzeImage by subgraph<Map<String, Any>, String>(
-        name = "医学影像分析子图",
-        tools = listOf(MedicalImageAnalyzerTool)
+    val analysisSubgraph by subgraph<ValidatedClinicalAnalysisRequest, StructuredClinicalAnalysis>(
+        name = "受控结构化分析子图",
+        tools = listOf(MedicalImageAnalyzerTool),
     ) {
-        // 定义节点
-        val nodeCallModelTool by node<Map<String, Any>, String>("调用模型工具分析医学影像"){ input ->
-            // 调用模型工具分析医学影像
-            val analysisResult = MedicalImageAnalyzerTool.execute(MedicalImageAnalyzerTool.Args(
-                imagePath = input["imagePath"] as String,
-                imageType = input["imageType"] as ImageType,
-                hospitalId = input["hospitalId"] as String,
-                patientId = input["patientId"] as String,
-                patientName = input["patientName"] as String
-            ))
-            
-            analysisResult
-        }
-        
-        val nodeHandleFailure by node<String, String>("处理失败"){ input ->
-            // 处理失败情况
-            if (input.contains("error")) {
-                // 记录错误信息
-                println("分析失败: $input")
-            }
-            input
+        val runDeterministicAnalysisNode by node<ValidatedClinicalAnalysisRequest, StructuredClinicalAnalysis>(
+            "调用受控分析工具"
+        ) { request ->
+            runDeterministicClinicalAnalysis(request)
         }
 
-        // 定义边
-        edge(nodeCallModelTool forwardTo nodeHandleFailure)
+        edge(nodeStart forwardTo runDeterministicAnalysisNode)
+        edge(runDeterministicAnalysisNode forwardTo nodeFinish)
     }
 
-    // 报表生成子图
-    val subgraphGenerateReport by subgraph<String, String>(
-        name = "生成报表子图",
-        tools = listOf(ReportGenerateTool)
+    val reportSubgraph by subgraph<StructuredClinicalAnalysis, String>(
+        name = "正式报告生成子图",
+        tools = listOf(ReportGenerateTool),
     ) {
-        // 定义节点
-        val nodeRenderPdf by node<String, String>("生成报告"){ input ->
-            // 生成报告
-            val report = ReportGenerateTool.execute(ReportGenerateTool.Args(
-                analysisResult = input
-            ))
-            report
-        }
-        
-        val nodeSaveReport by node<String, String>("保存报告"){ input ->
-            // 保存报告到数据库
-            transaction {
-                // 实际项目中，这里应该将报告保存到数据库
-                println("保存报告到数据库: $input")
-            }
-            input
+        val generateReportNode by node<StructuredClinicalAnalysis, StructuredClinicalReport>("生成正式报告") { analysis ->
+            generateControlledClinicalReport(analysis)
         }
 
-        // 定义边
-        edge(nodeRenderPdf forwardTo nodeSaveReport)
+        val persistReportNode by node<StructuredClinicalReport, String>("登记正式报告") { report ->
+            persistStructuredClinicalReport(report)
+        }
+
+        edge(nodeStart forwardTo generateReportNode)
+        edge(generateReportNode forwardTo persistReportNode)
+        edge(persistReportNode forwardTo nodeFinish)
     }
 
-    /**
-     * 子图路径
-     */
-    // 开始节点 -> 影像上传
     nodeStart then
-            subgraphUploadImage then
-            // 影像上传 -> 影像分析
-            subgraphAnalyzeImage then
-            // 影像分析 -> 报表生成
-            subgraphGenerateReport then
-            // 报表生成 -> 结束节点
-            nodeFinish
+        intakeSubgraph then
+        analysisSubgraph then
+        reportSubgraph then
+        nodeFinish
 }

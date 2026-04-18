@@ -1,6 +1,7 @@
 package aiagent.validation
 
 import kotlin.test.Test
+import kotlin.test.assertContains
 import kotlin.test.assertEquals
 
 class MetricAiConversationGuardTest {
@@ -32,5 +33,14 @@ class MetricAiConversationGuardTest {
         )
 
         assertEquals(MetricAiConversationScope.IMAGE_ANALYSIS, scope)
+    }
+
+    @Test
+    fun `should explicitly describe llm boundaries in unsupported prompt`() {
+        val prompt = buildUnsupportedMetricAiPrompt()
+
+        assertContains(prompt, "LLM 不执行分割")
+        assertContains(prompt, "不生成诊断性影像结论")
+        assertContains(prompt, "不改写正式结构化分析结果")
     }
 }

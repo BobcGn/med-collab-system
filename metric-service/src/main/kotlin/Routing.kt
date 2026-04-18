@@ -1,12 +1,8 @@
 package com.example
 
-import ai.koog.ktor.aiAgent
-import ai.koog.prompt.executor.clients.deepseek.DeepSeekModels
-import aiagent.strategy.metricReportStrategy
+import aiagent.strategy.executeControlledMetricReportPipeline
 import aiagent.tools.GeneratedReportPayload
 import aiagent.tools.MedicalImageAnalysisPayload
-import aiagent.tools.MedicalImageAnalyzerTool
-import aiagent.tools.ReportGenerateTool
 import aiagent.validation.MetricAiConversationScope
 import aiagent.validation.buildUnsupportedMetricAiPrompt
 import aiagent.validation.determineMetricAiConversationScope
@@ -30,7 +26,6 @@ import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.transactions.transaction
-import enums.ImageType
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.LocalDateTime
@@ -43,7 +38,7 @@ private val metricPayloadJson = Json {
     classDiscriminator = "kind"
 }
 
-internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
+internal fun Application.configureRouting() {
     val analysisRepository = AnalysisRepository()
     val medicalImageRepository = MedicalImageRepository()
     val reportRepository = ReportRepository()
@@ -304,17 +299,7 @@ internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
                     val response = buildAiResponse(
                         request = request,
                         user = socketUser,
-                        deepSeekSettings = deepSeekSettings,
-                        onExecutionError = { error ->
-                            application.log.error("HTTP AI agent execution failed", error)
-                        },
-                        executeAgent = { input ->
-                            aiAgent(
-                                strategy = metricReportStrategy,
-                                model = DeepSeekModels.DeepSeekReasoner,
-                                input = input,
-                            )
-                        },
+                        onExecutionError = { error -> application.log.error("HTTP structured pipeline failed", error) },
                     )
                     call.respond(
                         HttpStatusCode.OK,
@@ -385,11 +370,7 @@ internal fun Application.configureRouting(deepSeekSettings: DeepSeekSettings) {
                     buildAiResponse(
                         request = request,
                         user = socketUser,
-                        deepSeekSettings = deepSeekSettings,
-                        onExecutionError = { error ->
-                            application.log.error("WebSocket AI agent execution failed", error)
-                        },
-                        executeAgent = { input -> runMetricAiAgent(input) },
+                        onExecutionError = { error -> application.log.error("WebSocket structured pipeline failed", error) },
                     )
                 } catch (e: Exception) {
                     application.log.error("WebSocket AI 分析失败", e)
@@ -441,9 +422,7 @@ private fun buildSocketUser(
 private suspend fun buildAiResponse(
     request: MetricAiSocketRequest,
     user: SocketUserContext,
-    deepSeekSettings: DeepSeekSettings,
     onExecutionError: (Throwable) -> Unit = {},
-    executeAgent: suspend (String) -> String,
 ): MetricAiSocketEnvelope {
     val normalizedRequest = request.normalizeFor(user)
     val hasImage = !normalizedRequest.imageData.isNullOrBlank()
@@ -476,59 +455,32 @@ private suspend fun buildAiResponse(
         MetricAiConversationScope.IMAGE_ANALYSIS -> Unit
     }
 
-    val localExecution = runCatching {
+    val pipelineExecution = runCatching {
         runLocalMetricPipeline(normalizedRequest)
     }
 
-    if (localExecution.isSuccess) {
+    if (pipelineExecution.isSuccess) {
         return MetricAiSocketEnvelope(
             type = "ai_response",
             requestId = normalizedRequest.requestId,
-            message = "影像分析完成",
-            analysisResult = localExecution.getOrNull(),
+            message = "结构化影像分析与正式报告已完成",
+            analysisResult = pipelineExecution.getOrNull(),
             confidence = 95,
             createdAt = createdAt,
             user = user,
         )
     }
 
-    if (!deepSeekSettings.isConfigured) {
-        val error = localExecution.exceptionOrNull() ?: IllegalStateException(deepSeekSettings.unavailableReason())
-        return buildUnavailableAiResponse(
-            request = normalizedRequest,
-            user = user,
-            createdAt = createdAt,
-            reason = error.message ?: deepSeekSettings.unavailableReason(),
-        )
-    }
-
-    val agentInput = normalizedRequest.toAgentInput()
-    val executionResult = runCatching { executeAgent(agentInput) }
-
-    return executionResult.fold(
-        onSuccess = { analysisResult ->
-            MetricAiSocketEnvelope(
-                type = "ai_response",
-                requestId = normalizedRequest.requestId,
-                message = "影像分析完成",
-                analysisResult = analysisResult,
-                confidence = 90,
-                createdAt = createdAt,
-                user = user,
-            )
-        },
-        onFailure = { error ->
-            onExecutionError(error)
-            MetricAiSocketEnvelope(
-                type = "ai_response",
-                requestId = normalizedRequest.requestId,
-                message = "AI 分析失败，已返回基础结果",
-                analysisResult = buildImageFallbackResponse(normalizedRequest, error),
-                confidence = 0,
-                createdAt = createdAt,
-                user = user,
-            )
-        },
+    val error = pipelineExecution.exceptionOrNull() ?: IllegalStateException("结构化影像分析失败")
+    onExecutionError(error)
+    return MetricAiSocketEnvelope(
+        type = "ai_response",
+        requestId = normalizedRequest.requestId,
+        message = "结构化影像分析未完成，未启用 LLM 代替医学分析。请复核输入影像或联系人工复核。",
+        analysisResult = buildImageFallbackResponse(normalizedRequest, error),
+        confidence = 0,
+        createdAt = createdAt,
+        user = user,
     )
 }
 
@@ -571,7 +523,9 @@ private fun buildTextReply(request: MetricAiSocketRequest): String {
             append("：")
             append(request.message)
         }
-        append("。当前可继续围绕影像所见、测量指标和报告内容交流；如需正式分析结果和报表，请继续上传医学影像。")
+        append("。当前文本助手仅可解释既有影像所见、测量指标和正式报告内容；")
+        append("不会执行分割、不会生成诊断性影像结论、不会改写正式结构化分析结果。")
+        append("如需正式分析结果和正式报告，请上传医学影像并走受控结构化流水线。")
     }
 }
 
@@ -580,14 +534,15 @@ private fun buildImageFallbackResponse(
     error: Throwable,
 ): String {
     return buildString {
-        appendLine("影像分析结果")
+        appendLine("结构化影像分析状态")
         appendLine("患者: ${request.patientName} (${request.patientId})")
         appendLine("影像类型: ${request.imageType}")
         if (!request.message.isNullOrBlank()) {
             appendLine("补充说明: ${request.message}")
         }
-        appendLine("AI 分析未成功完成，已返回基础结果。")
-        append("建议: 请结合临床表现与原始影像进一步复核。")
+        appendLine("正式结构化分析未成功完成。")
+        appendLine("当前系统已阻止 LLM 代替 U-Net/结构化分析工具生成医学分析结论。")
+        append("建议: 请结合原始影像、临床表现和人工复核进一步处理。")
         error.message?.takeIf { it.isNotBlank() }?.let {
             append(" 详细原因: ")
             append(it)
@@ -595,53 +550,8 @@ private fun buildImageFallbackResponse(
     }
 }
 
-private fun buildUnavailableAiResponse(
-    request: MetricAiSocketRequest,
-    user: SocketUserContext,
-    createdAt: String,
-    reason: String,
-): MetricAiSocketEnvelope {
-    return MetricAiSocketEnvelope(
-        type = "ai_response",
-        requestId = request.requestId,
-        message = "AI 服务未配置，已返回基础结果",
-        analysisResult = buildImageFallbackResponse(
-            request = request,
-            error = IllegalStateException(reason),
-        ),
-        confidence = 0,
-        createdAt = createdAt,
-        user = user,
-    )
-}
-
 private suspend fun runLocalMetricPipeline(request: MetricAiSocketRequest): String {
-    val analysisResult = MedicalImageAnalyzerTool.execute(
-        MedicalImageAnalyzerTool.Args(
-            imagePath = request.imageData?.trim().orEmpty(),
-            imageType = parseImageType(request.imageType),
-            hospitalId = request.hospitalId.orEmpty(),
-            patientId = request.patientId.orEmpty(),
-            patientName = request.patientName.orEmpty(),
-        ),
-    )
-
-    return ReportGenerateTool.execute(
-        ReportGenerateTool.Args(
-            analysisResult = analysisResult,
-        ),
-    )
-}
-
-private fun parseImageType(rawType: String?): ImageType {
-    return when (rawType?.trim()?.uppercase()?.replace("-", "")?.replace("_", "")) {
-        "XRAY" -> ImageType.XRAY
-        "CT" -> ImageType.CT
-        "MRI" -> ImageType.MRI
-        "ULTRASOUND" -> ImageType.ULTRASOUND
-        "PATHOLOGY" -> ImageType.PATHOLOGY
-        else -> ImageType.OTHER
-    }
+    return executeControlledMetricReportPipeline(request.toAgentInput())
 }
 
 private fun decodeAnalysisResult(rawBody: String): AnalysisResultDto.AnalysisResultComplete {
@@ -687,14 +597,4 @@ private suspend fun DefaultWebSocketServerSession.sendSocketEnvelope(
     envelope: MetricAiSocketEnvelope,
 ) {
     send(Frame.Text(socketJson.encodeToString(envelope)))
-}
-
-private suspend fun DefaultWebSocketServerSession.runMetricAiAgent(input: String): String {
-    val routingCall = call as? RoutingCall
-        ?: throw IllegalStateException("WebSocket call is not a RoutingCall")
-    return RoutingContext(routingCall).aiAgent(
-        strategy = metricReportStrategy,
-        model = DeepSeekModels.DeepSeekReasoner,
-        input = input,
-    )
 }

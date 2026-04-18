@@ -1,0 +1,2 @@
+"""segmentation-service application package."""
+

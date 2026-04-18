@@ -40,9 +40,10 @@ private val highlightPalettes = listOf(
 )
 
 /**
- * 医疗图像分析工具
- * @Input 医学影像
- * @Output 结构化分析结果
+ * 医疗图像结构化分析工具。
+ *
+ * 该工具只负责受控影像分析/分割与结构化指标提取，
+ * 不负责正式报告生成，不负责自由文本解释，也不允许在未知模态下产出正式结果。
  */
 object MedicalImageAnalyzerTool : Tool<MedicalImageAnalyzerTool.Args, String>() {
     @Serializable
@@ -62,10 +63,13 @@ object MedicalImageAnalyzerTool : Tool<MedicalImageAnalyzerTool.Args, String>() 
     override val argsSerializer = Args.serializer()
     override val resultSerializer = String.serializer()
     override val name = "医学影像分析工具"
-    override val description = "分析医学影像文件，提取结构化指标并输出分析结果"
+    override val description = "仅执行受控医学影像结构化分析与分割，不生成正式报告，不输出自由文本诊断"
 
     public override suspend fun execute(args: Args): String {
         return runCatching {
+            require(args.imageType != ImageType.OTHER) {
+                "未知影像模态不允许进入正式结构化分析"
+            }
             val imagePath = requireNotBlank(args.imagePath, "影像路径不能为空")
             val hospitalId = requireNotBlank(args.hospitalId, "医院ID不能为空")
             val patientId = requireNotBlank(args.patientId, "患者ID不能为空")
