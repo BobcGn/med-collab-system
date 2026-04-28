@@ -102,6 +102,11 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8099 --app-dir .
   - 建议配置 `SEGMENTATION_SERVICE_MODEL_WEIGHTS_PATH` 以加载训练权重
   - 若未配置权重且 `allow_random_weights=true`，仍会执行真实 U-Net 前向，但输出仅适合联调
 
+补充说明：
+
+- 当前仓库中的 `metric-service` 本地默认不会自动把 `segmentation-service` 作为正式报告链路输入
+- 只有在你显式设置 `METRIC_SEGMENTATION_SERVICE_ENABLED=true`，且 `segmentation-service` 返回 `weights_loaded=true`、`backend!=mock` 时，才应让正式链路依赖该服务
+
 ## 运行验证
 
 启动后可检查：

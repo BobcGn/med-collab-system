@@ -121,7 +121,7 @@ scripts/quick-start.sh --segmentation-python /usr/local/bin/python3.11
 - `SEGMENTATION_VENV_DIR`
   说明：`segmentation-service` 虚拟环境目录，默认 `segmentation-service/.venv`
 - `METRIC_SEGMENTATION_SERVICE_ENABLED`
-  说明：`metric-service` 是否调用 Python 分割服务，默认 `true`
+  说明：`metric-service` 是否调用 Python 分割服务，默认 `false`。仅当 `segmentation-service` 已加载真实训练权重、且 `GET /api/v1/models/current` 返回 `weights_loaded=true` 时再显式开启
 - `METRIC_SEGMENTATION_SERVICE_URL`
   说明：`metric-service` 调用分割服务的基础地址，默认 `http://127.0.0.1:8099`
 - `METRIC_SEGMENTATION_SERVICE_TIMEOUT_SECONDS`

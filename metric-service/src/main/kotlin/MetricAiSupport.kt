@@ -73,7 +73,7 @@ internal fun resolveSegmentationServiceSettings(config: ApplicationConfig): Segm
     return SegmentationServiceSettings(
         enabled = parseBooleanConfig(
             value = config.propertyOrNull("segmentation.enabled")?.getString(),
-            defaultValue = true,
+            defaultValue = false,
         ),
         baseUrl = config.propertyOrNull("segmentation.baseUrl")
             ?.getString()

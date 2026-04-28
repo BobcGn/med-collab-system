@@ -4371,6 +4371,90 @@ function MedicalImageChatPage() {
   const getConversationId = () => patientId || patientName || 'unknown-patient'
   const buildImageMessageId = (requestId) => `img-${requestId}`
   const buildResultMessageId = (requestId) => `result-${requestId}`
+  const estimateDataUrlBytes = (value) => {
+    if (typeof value !== 'string' || !value.startsWith('data:')) {
+      return 0
+    }
+    const payload = value.slice(value.indexOf(',') + 1)
+    return Math.max(0, Math.floor(payload.length * 3 / 4))
+  }
+  const loadImageElement = (source) => new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('图片预览解码失败'))
+    image.src = source
+  })
+  const createPersistableImagePreview = async (source) => {
+    if (typeof source !== 'string' || !source.startsWith('data:')) {
+      return source
+    }
+
+    const sourceBytes = estimateDataUrlBytes(source)
+    if (sourceBytes > 0 && sourceBytes <= 360 * 1024) {
+      return source
+    }
+
+    try {
+      const image = await loadImageElement(source)
+      const width = image.naturalWidth || image.width
+      const height = image.naturalHeight || image.height
+      if (!width || !height) {
+        return source
+      }
+
+      const attempts = [
+        { maxEdge: 960, mimeType: 'image/jpeg', quality: 0.82 },
+        { maxEdge: 768, mimeType: 'image/jpeg', quality: 0.72 },
+        { maxEdge: 512, mimeType: 'image/jpeg', quality: 0.6 },
+      ]
+
+      let bestPreview = source
+      for (const attempt of attempts) {
+        const scale = Math.min(1, attempt.maxEdge / Math.max(width, height))
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.round(width * scale))
+        canvas.height = Math.max(1, Math.round(height * scale))
+        const context = canvas.getContext('2d')
+        if (!context) {
+          continue
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height)
+        const preview = canvas.toDataURL(attempt.mimeType, attempt.quality)
+        if (preview.length < bestPreview.length) {
+          bestPreview = preview
+        }
+        if (estimateDataUrlBytes(preview) <= 220 * 1024) {
+          return preview
+        }
+      }
+
+      return bestPreview
+    } catch (_error) {
+      return source
+    }
+  }
+  const sanitizeMessageForPersistence = async (message) => {
+    const next = { ...message }
+    const persistedContent = typeof next.persistedContent === 'string' && next.persistedContent
+      ? next.persistedContent
+      : await createPersistableImagePreview(next.content)
+    const sourceImagePreview = typeof next.sourceImagePreview === 'string' && next.sourceImagePreview
+      ? next.sourceImagePreview
+      : await createPersistableImagePreview(next.sourceImage)
+    delete next.saving
+    delete next.persistedContent
+    delete next.sourceImagePreview
+
+    if (next.type === 'image' && persistedContent) {
+      next.content = persistedContent
+    }
+
+    if (next.type === 'ai_result' && sourceImagePreview) {
+      next.sourceImage = sourceImagePreview
+    }
+
+    return next
+  }
 
   const scrollToBottom = () => {
     window.setTimeout(() => {
@@ -4385,13 +4469,11 @@ function MedicalImageChatPage() {
       return
     }
 
-    const serializableMessages = messages
-      .filter((message) => !message.ephemeral)
-      .map((message) => {
-        const next = { ...message }
-        delete next.saving
-        return next
-      })
+    const serializableMessages = await Promise.all(
+      messages
+        .filter((message) => !message.ephemeral)
+        .map(sanitizeMessageForPersistence),
+    )
 
     await metricApi.saveConversationHistory(getConversationId(), {
       conversationId: getConversationId(),
@@ -4734,27 +4816,32 @@ function MedicalImageChatPage() {
               const confidence = structuredPayload?.analysis
                 ? normalizeConfidence(structuredPayload.analysis.metrics?.confidence || payload.confidence)
                 : normalizeConfidence(payload.confidence)
-              setMessages((current) => [
-                ...current,
-                {
-                  id: buildResultMessageId(payload.requestId || createRequestId()),
-                  requestId: payload.requestId || '',
-                  role: 'ai-message',
-                  type: 'ai_result',
-                  content: structuredPayload?.summary || payload.analysisResult || payload.message || 'AI 已完成分析。',
-                  confidence,
-                  structuredPayload,
-                  sourceImage: current
-                    .slice()
-                    .reverse()
-                    .find((item) => item.type === 'image' && item.requestId === (payload.requestId || ''))?.content || null,
-                  persistableAnalysis: Boolean(structuredPayload?.analysis),
-                  confirmed: false,
-                  saving: false,
-                  savedAnalysisId: '',
-                  reportSaved: false,
-                },
-              ])
+              setMessages((current) => {
+                const matchedImageMessage = current
+                  .slice()
+                  .reverse()
+                  .find((item) => item.type === 'image' && item.requestId === (payload.requestId || ''))
+
+                return [
+                  ...current,
+                  {
+                    id: buildResultMessageId(payload.requestId || createRequestId()),
+                    requestId: payload.requestId || '',
+                    role: 'ai-message',
+                    type: 'ai_result',
+                    content: structuredPayload?.summary || payload.analysisResult || payload.message || 'AI 已完成分析。',
+                    confidence,
+                    structuredPayload,
+                    sourceImage: matchedImageMessage?.content || null,
+                    sourceImagePreview: matchedImageMessage?.persistedContent || matchedImageMessage?.content || null,
+                    persistableAnalysis: Boolean(structuredPayload?.analysis),
+                    confirmed: false,
+                    saving: false,
+                    savedAnalysisId: '',
+                    reportSaved: false,
+                  },
+                ]
+              })
             } else {
               setMessages((current) => [
                 ...current,
@@ -4912,11 +4999,13 @@ function MedicalImageChatPage() {
     Array.from(files).forEach((file) => {
       const requestId = createRequestId()
       const reader = new FileReader()
-      reader.onload = (loadEvent) => {
+      reader.onload = async (loadEvent) => {
         const imageUrl = loadEvent.target?.result
         if (!imageUrl) {
           return
         }
+
+        const persistedContent = await createPersistableImagePreview(imageUrl)
 
         setMessages((current) => [
           ...current,
@@ -4926,6 +5015,7 @@ function MedicalImageChatPage() {
             role: 'doctor-message',
             type: 'image',
             content: imageUrl,
+            persistedContent,
             imageType,
             imageDate: new Date().toISOString().split('T')[0],
           },
