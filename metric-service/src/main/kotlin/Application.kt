@@ -3,6 +3,7 @@ package com.example
 import ai.koog.ktor.Koog
 import ai.koog.prompt.executor.clients.deepseek.DeepSeekModels
 import ai.koog.prompt.llm.LLMProvider
+import aiagent.tools.MedicalImageAnalyzerTool
 import io.ktor.server.application.*
 import io.ktor.server.netty.EngineMain
 import kotlin.time.Duration.Companion.minutes
@@ -14,6 +15,13 @@ fun main(args: Array<String>) {
 
 fun Application.module() {
     val deepSeekSettings = resolveDeepSeekSettings(environment.config)
+    val segmentationServiceSettings = resolveSegmentationServiceSettings(environment.config)
+    MedicalImageAnalyzerTool.configureSegmentationService(segmentationServiceSettings)
+    if (segmentationServiceSettings.enabled) {
+        log.info("Segmentation service enabled at {}", segmentationServiceSettings.baseUrl)
+    } else {
+        log.warn("Segmentation service is disabled; metric-service will use local deterministic analyzer only")
+    }
 
     /**
      * 安装Koog插件并配置DeepSeek Agent

@@ -46,6 +46,9 @@ private val highlightPalettes = listOf(
  * 不负责正式报告生成，不负责自由文本解释，也不允许在未知模态下产出正式结果。
  */
 object MedicalImageAnalyzerTool : Tool<MedicalImageAnalyzerTool.Args, String>() {
+    @Volatile
+    private var segmentationServiceSettings: SegmentationServiceSettings = SegmentationServiceSettings.DISABLED
+
     @Serializable
     data class Args(
         @property:LLMDescription("医学影像路径")
@@ -65,6 +68,10 @@ object MedicalImageAnalyzerTool : Tool<MedicalImageAnalyzerTool.Args, String>() 
     override val name = "医学影像分析工具"
     override val description = "仅执行受控医学影像结构化分析与分割，不生成正式报告，不输出自由文本诊断"
 
+    internal fun configureSegmentationService(settings: SegmentationServiceSettings) {
+        segmentationServiceSettings = settings
+    }
+
     public override suspend fun execute(args: Args): String {
         return runCatching {
             require(args.imageType != ImageType.OTHER) {
@@ -77,6 +84,17 @@ object MedicalImageAnalyzerTool : Tool<MedicalImageAnalyzerTool.Args, String>() 
             val now = LocalDateTime.now()
 
             val source = loadSource(imagePath)
+            if (segmentationServiceSettings.enabled) {
+                val payload = analyzeWithSegmentationService(
+                    settings = segmentationServiceSettings,
+                    args = args,
+                    imagePath = imagePath,
+                    source = source,
+                    now = now,
+                )
+                return@runCatching toolJson.encodeToString(MedicalImageAnalysisPayload.serializer(), payload)
+            }
+
             val features = extractFeatures(source, args.imageType)
             val metrics = buildMetric(args.imageType, features)
             val findings = buildFindings(args.imageType, features, metrics)
@@ -296,6 +314,259 @@ private fun extractFeatures(source: SourceData, imageType: ImageType): Extracted
 
     // 无法读取像素时只返回元数据级分析，避免伪造临床结论。
     return extractMetadataFeatures(source.snapshot)
+}
+
+private fun analyzeWithSegmentationService(
+    settings: SegmentationServiceSettings,
+    args: MedicalImageAnalyzerTool.Args,
+    imagePath: String,
+    source: SourceData,
+    now: LocalDateTime,
+): MedicalImageAnalysisPayload {
+    require(source.snapshot.rasterDataAvailable) {
+        "分割服务需要可读取的原始像素，当前输入仅提供引用或不可解码数据"
+    }
+
+    val requestId = buildStableId("SEG", "$imagePath|${args.patientId}|${args.imageType}")
+    val response = SegmentationServiceClient.segment(
+        settings = settings,
+        request = SegmentationServiceRequest(
+            requestId = requestId,
+            hospitalId = args.hospitalId,
+            patientId = args.patientId,
+            patientName = args.patientName,
+            imageType = args.imageType.name,
+            image = SegmentationImageReference(
+                sourceType = source.snapshot.sourceType,
+                value = segmentationImageReferenceValue(source.snapshot, imagePath),
+                mimeType = source.snapshot.mimeType,
+            ),
+        ),
+    )
+
+    validateSegmentationResponse(response, args)
+
+    val localPixelFeatures = source.image?.let { image -> extractPixelFeatures(image, args.imageType) }
+    val features = extractSegmentationFeatures(response, localPixelFeatures)
+    val metrics = buildMetric(args.imageType, features)
+    val analysis = AnalysisResultDto.AnalysisResultComplete(
+        id = buildRandomId("ANL"),
+        hospitalId = args.hospitalId,
+        imageId = buildStableId("IMG", "$imagePath|${args.patientId}|${args.imageType}|${response.requestId}"),
+        patientId = args.patientId,
+        patientName = args.patientName,
+        metrics = metrics,
+        status = if (response.status == "completed") "completed" else "limited",
+        createdAt = now.toString(),
+        completedAt = now.toString(),
+        errorMessage = null,
+    )
+
+    val segmentationIndicators = buildSegmentationIndicators(response)
+    return MedicalImageAnalysisPayload(
+        analysis = analysis,
+        imageType = args.imageType.name,
+        imagePath = imagePath,
+        analysisMode = PIXEL_ANALYSIS_MODE,
+        source = source.snapshot,
+        keyIndicators = buildKeyIndicators(source.snapshot, features, metrics) + segmentationIndicators,
+        findings = buildSegmentationFindings(response, args.imageType, features, metrics),
+        summary = buildSegmentationSummary(response, args.imageType, features, metrics),
+        recommendations = buildSegmentationRecommendations(response, args.imageType, features),
+        highlightRegions = features.highlightRegions,
+        highlightLegend = buildHighlightLegend(features.highlightRegions),
+        limitations = buildSegmentationLimitations(response),
+    )
+}
+
+private fun segmentationImageReferenceValue(snapshot: ImageSourceSnapshot, imagePath: String): String {
+    return when (snapshot.sourceType) {
+        "LOCAL_FILE" -> snapshot.resolvedPath ?: imagePath
+        else -> imagePath
+    }
+}
+
+private fun validateSegmentationResponse(
+    response: SegmentationServiceResponse,
+    args: MedicalImageAnalyzerTool.Args,
+) {
+    require(response.hospitalId == args.hospitalId) {
+        "分割服务响应中的医院ID与请求不一致"
+    }
+    require(response.patientId == args.patientId) {
+        "分割服务响应中的患者ID与请求不一致"
+    }
+    require(response.patientName == args.patientName) {
+        "分割服务响应中的患者姓名与请求不一致"
+    }
+    require(response.imageType.equals(args.imageType.name, ignoreCase = true)) {
+        "分割服务响应中的影像类型与请求不一致"
+    }
+    require(response.status != "failed" && response.qualityGate.status != "FAIL") {
+        "分割服务质量门禁失败: ${response.qualityGate.reason}"
+    }
+    require(response.regions.isNotEmpty()) {
+        "分割服务未返回可用于正式报告的结构化区域"
+    }
+}
+
+private fun extractSegmentationFeatures(
+    response: SegmentationServiceResponse,
+    localPixelFeatures: ExtractedFeatures?,
+): ExtractedFeatures {
+    val highlightRegions = buildSegmentationHighlightRegions(response)
+    val primaryRegion = response.regions.maxByOrNull { it.confidence }
+    val totalCoverage = response.regions.sumOf { it.coveragePercent }
+    val bestConfidence = response.regions.maxOfOrNull { it.confidence } ?: 0.0
+    val qualityBase = when (response.qualityGate.status) {
+        "PASS" -> 84.0
+        "LIMITED" -> 62.0
+        else -> 45.0
+    }
+
+    return ExtractedFeatures(
+        analysisMode = PIXEL_ANALYSIS_MODE,
+        meanLuminance = localPixelFeatures?.meanLuminance ?: 128.0,
+        contrast = localPixelFeatures?.contrast ?: (bestConfidence * 60.0),
+        edgeDensity = localPixelFeatures?.edgeDensity ?: 0.18,
+        lesionCoverage = round2((totalCoverage / 100.0).coerceIn(0.0, 1.0)),
+        lesionSizeMm = primaryRegion?.estimatedSizeMm?.let(::round1) ?: 0.0,
+        location = primaryRegion?.location ?: "分割服务未标注位置",
+        confidence = round2(bestConfidence.coerceIn(0.0, 1.0)),
+        imageQualityScore = round1((qualityBase + bestConfidence.coerceIn(0.0, 1.0) * 14.0).coerceIn(45.0, 98.0)),
+        highlightRegions = highlightRegions,
+    )
+}
+
+private fun buildSegmentationHighlightRegions(response: SegmentationServiceResponse): List<HighlightRegion> {
+    return response.regions
+        .sortedWith(compareByDescending<SegmentationRegion> { it.confidence }.thenByDescending { it.coveragePercent })
+        .take(4)
+        .mapIndexed { index, region ->
+            val palette = highlightPalettes[index % highlightPalettes.size]
+            val priority = index + 1
+            HighlightRegion(
+                id = region.regionId,
+                label = region.label.ifBlank { "S$priority" },
+                colorName = palette.colorName,
+                colorHex = palette.colorHex,
+                priority = priority,
+                annotationTitle = annotationTitleForPriority(priority),
+                annotationMeaning = "${palette.colorName}标注来自 segmentation-service，类别为 ${region.className}，质量门禁为 ${response.qualityGate.status}。",
+                location = region.location,
+                severity = region.severity,
+                confidence = round2(region.confidence.coerceIn(0.0, 1.0)),
+                coveragePercent = round1(region.coveragePercent.coerceIn(0.0, 100.0)),
+                estimatedSizeMm = round1(region.estimatedSizeMm.coerceAtLeast(0.0)),
+                shape = "BLOB",
+                rotationDegrees = 0.0,
+                boundingBox = HighlightBoundingBox(
+                    leftPercent = round1(region.boundingBox.leftPercent.coerceIn(0.0, 100.0)),
+                    topPercent = round1(region.boundingBox.topPercent.coerceIn(0.0, 100.0)),
+                    widthPercent = round1(region.boundingBox.widthPercent.coerceIn(0.0, 100.0)),
+                    heightPercent = round1(region.boundingBox.heightPercent.coerceIn(0.0, 100.0)),
+                ),
+                contour = region.contour.map { point ->
+                    HighlightContourPoint(
+                        xPercent = round1(point.xPercent.coerceIn(0.0, 100.0)),
+                        yPercent = round1(point.yPercent.coerceIn(0.0, 100.0)),
+                    )
+                },
+                note = "${palette.meaning}；分割模型 ${response.model.name} ${response.model.version}。",
+            )
+        }
+}
+
+private fun buildSegmentationIndicators(response: SegmentationServiceResponse): List<IndicatorItem> {
+    val totalDurationMs = response.timing.preprocessMs + response.timing.inferenceMs + response.timing.postprocessMs
+    val artifactSummary = listOfNotNull(
+        response.artifacts.maskPath?.let { "mask" },
+        response.artifacts.overlayPath?.let { "overlay" },
+        response.artifacts.metadataPath?.let { "metadata" },
+    ).joinToString("、").ifBlank { "未返回" }
+
+    return listOf(
+        IndicatorItem("分割服务状态", response.status, interpretation = response.message),
+        IndicatorItem("质量门禁", response.qualityGate.status, interpretation = response.qualityGate.reason),
+        IndicatorItem("分割模型", "${response.model.name} ${response.model.version}", interpretation = response.model.backend),
+        IndicatorItem("模型权重", if (response.model.weightsLoaded) "已加载" else "未加载"),
+        IndicatorItem("分割耗时", totalDurationMs.toString(), "ms"),
+        IndicatorItem("分割产物", artifactSummary),
+    )
+}
+
+private fun buildSegmentationFindings(
+    response: SegmentationServiceResponse,
+    imageType: ImageType,
+    features: ExtractedFeatures,
+    metrics: MetricDto,
+): List<String> {
+    val findings = mutableListOf(
+        "segmentation-service 已完成 ${imageType.name} 结构化分割，质量门禁 ${response.qualityGate.status}：${response.qualityGate.reason}。",
+        "本次返回 ${response.regions.size} 个结构化区域，综合影像质量评分 ${features.imageQualityScore}，结果可信度 ${round1(features.confidence * 100.0)}%。",
+    )
+    findings += features.highlightRegions.take(3).map { region ->
+        "${region.colorName}${region.label} 来自分割区域，位于 ${region.location}，估计范围 ${region.estimatedSizeMm} mm，覆盖 ${region.coveragePercent}%，风险 ${region.severity}。"
+    }
+    findings += "异常区域总覆盖约 ${round1(features.lesionCoverage * 100.0)}%，综合风险判定为 ${riskLevel(features)}。"
+    findings += when (metrics) {
+        is MetricDto.CTMetric -> "CT 结构化指标已记录密度、范围、位置和风险等级。"
+        is MetricDto.MRIMetric -> "MRI 结构化指标已记录信号、范围、位置和组织特征。"
+        is MetricDto.XRayMetric -> "XRAY 结构化指标已记录透亮度/密度、范围、位置和骨结构提示。"
+        is MetricDto.UltrasoundMetric -> "超声结构化指标已记录回声、范围、位置和血流提示。"
+        else -> "通用结构化指标已记录分割范围、覆盖比例和可信度。"
+    }
+    return findings
+}
+
+private fun buildSegmentationSummary(
+    response: SegmentationServiceResponse,
+    imageType: ImageType,
+    features: ExtractedFeatures,
+    metrics: MetricDto,
+): String {
+    val riskText = when (metrics) {
+        is MetricDto.CTMetric -> metrics.severity
+        else -> riskLevel(features)
+    }
+    val primaryRegion = features.highlightRegions.firstOrNull()
+    val regionSummary = primaryRegion?.let {
+        "主区域位于 ${it.location}，估计范围 ${it.estimatedSizeMm} mm"
+    } ?: "未返回主区域"
+
+    return "${imageType.name} 影像已由 segmentation-service 完成像素级结构化分割，共 ${response.regions.size} 个区域，$regionSummary，风险等级 $riskText。"
+}
+
+private fun buildSegmentationRecommendations(
+    response: SegmentationServiceResponse,
+    imageType: ImageType,
+    features: ExtractedFeatures,
+): List<String> {
+    val recommendations = buildRecommendations(imageType, features).toMutableList()
+    if (response.qualityGate.status == "LIMITED") {
+        recommendations += "分割服务质量门禁为 LIMITED，建议人工复核后再用于临床流程。"
+    }
+    if (!response.model.weightsLoaded) {
+        recommendations += "当前分割模型未加载训练权重，结果仅适合联调或人工复核辅助，不建议直接用于临床判读。"
+    }
+    response.artifacts.overlayPath?.let { overlayPath ->
+        recommendations += "可结合分割服务 overlay 产物复核高亮区域：$overlayPath"
+    }
+    return recommendations.distinct()
+}
+
+private fun buildSegmentationLimitations(response: SegmentationServiceResponse): List<String> {
+    val limitations = mutableListOf<String>()
+    if (response.qualityGate.status != "PASS") {
+        limitations += "分割服务质量门禁 ${response.qualityGate.status}: ${response.qualityGate.reason}"
+    }
+    if (!response.model.weightsLoaded) {
+        limitations += "分割模型未加载训练权重"
+    }
+    if (response.regions.isEmpty()) {
+        limitations += "分割服务未返回结构化区域"
+    }
+    return limitations
 }
 
 private fun extractPixelFeatures(image: BufferedImage, imageType: ImageType): ExtractedFeatures {

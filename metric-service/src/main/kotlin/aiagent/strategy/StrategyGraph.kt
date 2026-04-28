@@ -181,14 +181,17 @@ private fun validateStructuredAnalysisPayload(
     require(payload.imageType == request.request.imageType.name) {
         "分析结果中的影像类型与请求不一致"
     }
-    require(payload.analysisMode == "PIXEL" || payload.analysisMode == "METADATA_ONLY") {
-        "分析结果中的 analysisMode 不受支持"
+    require(payload.analysisMode == "PIXEL") {
+        "正式报告仅接受像素级结构化分析结果"
     }
     require(payload.summary.isNotBlank()) {
         "分析结果缺少结构化摘要"
     }
     require(payload.findings.isNotEmpty()) {
         "分析结果缺少结构化 findings"
+    }
+    require(payload.source.rasterDataAvailable) {
+        "输入影像未提供可读取像素，禁止生成正式报告"
     }
     require(payload.source.readable) {
         "输入影像不可读，禁止生成正式结构化结果"

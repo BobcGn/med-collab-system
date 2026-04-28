@@ -120,6 +120,12 @@ scripts/quick-start.sh --segmentation-python /usr/local/bin/python3.11
   说明：用于创建和运行 `segmentation-service` 虚拟环境的 Python
 - `SEGMENTATION_VENV_DIR`
   说明：`segmentation-service` 虚拟环境目录，默认 `segmentation-service/.venv`
+- `METRIC_SEGMENTATION_SERVICE_ENABLED`
+  说明：`metric-service` 是否调用 Python 分割服务，默认 `true`
+- `METRIC_SEGMENTATION_SERVICE_URL`
+  说明：`metric-service` 调用分割服务的基础地址，默认 `http://127.0.0.1:8099`
+- `METRIC_SEGMENTATION_SERVICE_TIMEOUT_SECONDS`
+  说明：`metric-service` 等待分割服务响应的超时时间，默认 `30`
 
 ## 分割服务说明
 
@@ -129,6 +135,8 @@ scripts/quick-start.sh --segmentation-python /usr/local/bin/python3.11
 - 执行 U-Net/Mock 分割推理
 - 返回结构化分割结果
 - 输出 mask / overlay / result.json 等工件
+
+`metric-service` 在正式影像分析链路中会调用 `segmentation-service` 的 `POST /api/v1/segment` 接口；若该接口不可用或质量门禁失败，正式报告链路会失败并提示人工复核，不会回退到 LLM 生成医学结论。
 
 单独说明见 [segmentation-service/README.md](segmentation-service/README.md) 和 [docs/segmentation-service-operation-manual.md](docs/segmentation-service-operation-manual.md)。
 

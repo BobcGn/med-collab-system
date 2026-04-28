@@ -1,5 +1,6 @@
 package com.example
 
+import aiagent.tools.SegmentationServiceSettings
 import dto.MetricAiSocketRequest
 import io.ktor.server.config.ApplicationConfig
 import io.ktor.server.config.propertyOrNull
@@ -65,30 +66,34 @@ internal fun MetricAiSocketRequest.toAgentInput(json: Json): String {
 }
 
 internal fun buildAgentImageReference(imageData: String?): String {
-    val normalized = imageData?.trim().orEmpty()
-    if (normalized.isBlank()) {
-        return ""
-    }
-
-    if (normalized.startsWith("data:", ignoreCase = true)) {
-        return buildInlineImageReference(normalized)
-    }
-
-    return if (normalized.length > 240) {
-        normalized.take(240) + "...(truncated)"
-    } else {
-        normalized
-    }
+    return imageData?.trim().orEmpty()
 }
 
-private fun buildInlineImageReference(dataUrl: String): String {
-    val header = dataUrl.substringBefore(',')
-    val payload = dataUrl.substringAfter(',', "")
-    val mimeType = header
-        .substringAfter("data:", "")
-        .substringBefore(';')
-        .ifBlank { "application/octet-stream" }
-    val approximateBytes = if (payload.isBlank()) 0 else (payload.length * 3L) / 4L
+internal fun resolveSegmentationServiceSettings(config: ApplicationConfig): SegmentationServiceSettings {
+    return SegmentationServiceSettings(
+        enabled = parseBooleanConfig(
+            value = config.propertyOrNull("segmentation.enabled")?.getString(),
+            defaultValue = true,
+        ),
+        baseUrl = config.propertyOrNull("segmentation.baseUrl")
+            ?.getString()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: SegmentationServiceSettings.DISABLED.baseUrl,
+        timeoutSeconds = config.propertyOrNull("segmentation.timeoutSeconds")
+            ?.getString()
+            ?.trim()
+            ?.toLongOrNull()
+            ?.coerceAtLeast(1)
+            ?: SegmentationServiceSettings.DISABLED.timeoutSeconds,
+    )
+}
 
-    return "inline-image://$mimeType?size=${approximateBytes}B"
+private fun parseBooleanConfig(value: String?, defaultValue: Boolean): Boolean {
+    return when (value?.trim()?.lowercase()) {
+        null, "" -> defaultValue
+        "true", "1", "yes", "y", "on" -> true
+        "false", "0", "no", "n", "off" -> false
+        else -> defaultValue
+    }
 }

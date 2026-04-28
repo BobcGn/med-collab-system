@@ -123,7 +123,19 @@ flowchart LR
 - 文本讨论回复中明确声明 LLM 不执行分割、不生成诊断结论、不改写正式结果
 - 正式报告阶段仅接收结构化分析 payload，不再接受兼容模式输入
 
-### 5.3 LLM 配置
+### 5.3 分割服务对接
+
+- `metric-service/src/main/kotlin/aiagent/tools/SegmentationServiceClient.kt`
+- `metric-service/src/main/kotlin/aiagent/tools/MedicalImageAnalyzerTool.kt`
+
+当前正式影像分析链路已对接独立 Python `segmentation-service`：
+
+- `metric-service` 默认调用 `segmentation-service` 的 `POST /api/v1/segment`
+- 分割服务返回的结构化区域、质量门禁、模型信息和工件路径会映射为正式分析 payload
+- 分割服务不可用、契约不匹配、质量门禁失败或无结构化区域时，链路失败并进入人工复核提示
+- 不允许在分割服务失败时回退到 LLM 生成医学结论
+
+### 5.4 LLM 配置
 
 - `metric-service/src/main/kotlin/Application.kt`
 

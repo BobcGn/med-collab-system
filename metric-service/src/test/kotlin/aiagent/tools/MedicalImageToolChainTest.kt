@@ -3,14 +3,19 @@ package aiagent.tools
 import dto.MetricDto
 import dto.AnalysisResultDto
 import enums.ImageType
+import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.runBlocking
 import java.awt.Color
 import java.awt.image.BufferedImage
+import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicReference
 import javax.imageio.ImageIO
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
@@ -18,6 +23,11 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class MedicalImageToolChainTest {
+    @AfterTest
+    fun resetSegmentationService() {
+        MedicalImageAnalyzerTool.configureSegmentationService(SegmentationServiceSettings.DISABLED)
+    }
+
     @Test
     fun `should analyze raster image into structured payload`() {
         runBlocking {
@@ -81,6 +91,51 @@ class MedicalImageToolChainTest {
                 assertTrue(payload.summary.contains("像素级分析"))
                 assertTrue(payload.highlightRegions.isNotEmpty())
             } finally {
+                Files.deleteIfExists(imagePath)
+            }
+        }
+    }
+
+    @Test
+    fun `should consume segmentation service result for uploaded data url`() {
+        runBlocking {
+            val imagePath = createSampleImage()
+            val receivedRequestBody = AtomicReference("")
+            val server = startFakeSegmentationService(receivedRequestBody)
+
+            try {
+                MedicalImageAnalyzerTool.configureSegmentationService(
+                    SegmentationServiceSettings(
+                        enabled = true,
+                        baseUrl = "http://127.0.0.1:${server.address.port}",
+                        timeoutSeconds = 5,
+                    ),
+                )
+
+                val rawResult = MedicalImageAnalyzerTool.execute(
+                    MedicalImageAnalyzerTool.Args(
+                        imagePath = toDataUrl(imagePath),
+                        imageType = ImageType.XRAY,
+                        hospitalId = "H-SEG",
+                        patientId = "P-SEG",
+                        patientName = "分割测试",
+                    ),
+                )
+
+                val payload = toolJson.decodeFromString(
+                    MedicalImageAnalysisPayload.serializer(),
+                    rawResult,
+                )
+
+                assertEquals("PIXEL", payload.analysisMode)
+                assertEquals("completed", payload.analysis.status)
+                assertTrue(payload.summary.contains("segmentation-service"))
+                assertTrue(payload.highlightRegions.isNotEmpty())
+                assertTrue(payload.keyIndicators.any { indicator -> indicator.name == "分割模型" })
+                assertContains(receivedRequestBody.get(), "\"source_type\": \"DATA_URL\"")
+                assertContains(receivedRequestBody.get(), "\"patient_id\": \"P-SEG\"")
+            } finally {
+                server.stop(0)
                 Files.deleteIfExists(imagePath)
             }
         }
@@ -227,5 +282,87 @@ class MedicalImageToolChainTest {
     private fun toDataUrl(path: Path): String {
         val bytes = Files.readAllBytes(path)
         return "data:image/png;base64,${Base64.getEncoder().encodeToString(bytes)}"
+    }
+
+    private fun startFakeSegmentationService(receivedRequestBody: AtomicReference<String>): HttpServer {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/api/v1/segment") { exchange ->
+            val requestBody = exchange.requestBody.use { inputStream ->
+                String(inputStream.readBytes(), UTF_8)
+            }
+            receivedRequestBody.set(requestBody)
+            val responseBody = fakeSegmentationResponse().toByteArray(UTF_8)
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            exchange.sendResponseHeaders(200, responseBody.size.toLong())
+            exchange.responseBody.use { outputStream ->
+                outputStream.write(responseBody)
+            }
+        }
+        server.start()
+        return server
+    }
+
+    private fun fakeSegmentationResponse(): String {
+        return """
+            {
+              "request_id": "SEG-TEST",
+              "status": "completed",
+              "message": "Segmentation completed: test quality gate passed.",
+              "hospital_id": "H-SEG",
+              "patient_id": "P-SEG",
+              "patient_name": "分割测试",
+              "image_type": "XRAY",
+              "model": {
+                "name": "test-unet",
+                "version": "1.0",
+                "backend": "mock",
+                "device": "cpu",
+                "input_height": 256,
+                "input_width": 256,
+                "in_channels": 1,
+                "output_classes": 1,
+                "weights_path": null,
+                "weights_loaded": true
+              },
+              "timing": {
+                "preprocess_ms": 4,
+                "inference_ms": 8,
+                "postprocess_ms": 3
+              },
+              "quality_gate": {
+                "status": "PASS",
+                "reason": "Segmentation passed contract test"
+              },
+              "artifacts": {
+                "mask_path": "/tmp/seg-test/mask.png",
+                "overlay_path": "/tmp/seg-test/overlay.png",
+                "metadata_path": "/tmp/seg-test/result.json"
+              },
+              "regions": [
+                {
+                  "region_id": "region-1",
+                  "class_name": "lesion",
+                  "label": "L1",
+                  "confidence": 0.91,
+                  "location": "右上象限",
+                  "severity": "中风险",
+                  "coverage_percent": 12.5,
+                  "estimated_size_mm": 18.4,
+                  "bounding_box": {
+                    "left_percent": 22.0,
+                    "top_percent": 18.0,
+                    "width_percent": 34.0,
+                    "height_percent": 28.0
+                  },
+                  "contour": [
+                    {"x_percent": 22.0, "y_percent": 18.0},
+                    {"x_percent": 56.0, "y_percent": 18.0},
+                    {"x_percent": 56.0, "y_percent": 46.0},
+                    {"x_percent": 22.0, "y_percent": 46.0}
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
     }
 }

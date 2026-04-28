@@ -5,7 +5,6 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 
 class MetricAiSupportTest {
     @Test
@@ -22,7 +21,7 @@ class MetricAiSupportTest {
     }
 
     @Test
-    fun `should summarize inline image payload before sending to llm`() {
+    fun `should preserve uploaded raster payload for structured pipeline`() {
         val request = MetricAiSocketRequest(
             type = "image",
             imageData = "data:image/png;base64,ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
@@ -35,7 +34,6 @@ class MetricAiSupportTest {
 
         val agentInput = request.toAgentInput(Json)
 
-        assertContains(agentInput, "inline-image://image/png?size=")
-        assertFalse(agentInput.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"))
+        assertContains(agentInput, "data:image/png;base64,ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
     }
 }
