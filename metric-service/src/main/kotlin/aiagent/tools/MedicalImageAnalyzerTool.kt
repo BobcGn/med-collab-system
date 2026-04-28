@@ -327,7 +327,7 @@ private fun analyzeWithSegmentationService(
         "分割服务需要可读取的原始像素，当前输入仅提供引用或不可解码数据"
     }
 
-    val requestId = buildStableId("SEG", "$imagePath|${args.patientId}|${args.imageType}")
+    val requestId = buildRandomId("SEG")
     val response = SegmentationServiceClient.segment(
         settings = settings,
         request = SegmentationServiceRequest(
@@ -402,8 +402,14 @@ private fun validateSegmentationResponse(
     require(response.imageType.equals(args.imageType.name, ignoreCase = true)) {
         "分割服务响应中的影像类型与请求不一致"
     }
-    require(response.status != "failed" && response.qualityGate.status != "FAIL") {
-        "分割服务质量门禁失败: ${response.qualityGate.reason}"
+    require(response.status == "completed" && response.qualityGate.status == "PASS") {
+        "分割服务质量门禁未通过: status=${response.status}, gate=${response.qualityGate.status}, reason=${response.qualityGate.reason}"
+    }
+    require(response.model.weightsLoaded) {
+        "分割模型未加载训练权重，禁止进入正式报告阶段"
+    }
+    require(!response.model.backend.equals("mock", ignoreCase = true)) {
+        "分割服务 mock 后端仅允许联调，禁止进入正式报告阶段"
     }
     require(response.regions.isNotEmpty()) {
         "分割服务未返回可用于正式报告的结构化区域"
@@ -543,14 +549,8 @@ private fun buildSegmentationRecommendations(
     features: ExtractedFeatures,
 ): List<String> {
     val recommendations = buildRecommendations(imageType, features).toMutableList()
-    if (response.qualityGate.status == "LIMITED") {
-        recommendations += "分割服务质量门禁为 LIMITED，建议人工复核后再用于临床流程。"
-    }
-    if (!response.model.weightsLoaded) {
-        recommendations += "当前分割模型未加载训练权重，结果仅适合联调或人工复核辅助，不建议直接用于临床判读。"
-    }
-    response.artifacts.overlayPath?.let { overlayPath ->
-        recommendations += "可结合分割服务 overlay 产物复核高亮区域：$overlayPath"
+    if (response.artifacts.overlayPath != null || response.artifacts.maskPath != null || response.artifacts.metadataPath != null) {
+        recommendations += "分割服务已生成审计工件，可通过受控服务端审计渠道复核高亮区域。"
     }
     return recommendations.distinct()
 }

@@ -13,13 +13,14 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
-import java.util.concurrent.atomic.AtomicReference
 import javax.imageio.ImageIO
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 class MedicalImageToolChainTest {
@@ -100,8 +101,8 @@ class MedicalImageToolChainTest {
     fun `should consume segmentation service result for uploaded data url`() {
         runBlocking {
             val imagePath = createSampleImage()
-            val receivedRequestBody = AtomicReference("")
-            val server = startFakeSegmentationService(receivedRequestBody)
+            val receivedRequestBodies = mutableListOf<String>()
+            val server = startFakeSegmentationService(receivedRequestBodies)
 
             try {
                 MedicalImageAnalyzerTool.configureSegmentationService(
@@ -132,8 +133,164 @@ class MedicalImageToolChainTest {
                 assertTrue(payload.summary.contains("segmentation-service"))
                 assertTrue(payload.highlightRegions.isNotEmpty())
                 assertTrue(payload.keyIndicators.any { indicator -> indicator.name == "分割模型" })
-                assertContains(receivedRequestBody.get(), "\"source_type\": \"DATA_URL\"")
-                assertContains(receivedRequestBody.get(), "\"patient_id\": \"P-SEG\"")
+                assertFalse(payload.recommendations.any { recommendation -> recommendation.contains("/tmp/seg-test") })
+                assertEquals(1, receivedRequestBodies.size)
+                assertContains(receivedRequestBodies.single(), "\"source_type\": \"DATA_URL\"")
+                assertContains(receivedRequestBodies.single(), "\"patient_id\": \"P-SEG\"")
+            } finally {
+                server.stop(0)
+                Files.deleteIfExists(imagePath)
+            }
+        }
+    }
+
+    @Test
+    fun `should use unique segmentation request id for repeated analysis`() {
+        runBlocking {
+            val imagePath = createSampleImage()
+            val dataUrl = toDataUrl(imagePath)
+            val receivedRequestBodies = mutableListOf<String>()
+            val server = startFakeSegmentationService(receivedRequestBodies)
+
+            try {
+                MedicalImageAnalyzerTool.configureSegmentationService(
+                    SegmentationServiceSettings(
+                        enabled = true,
+                        baseUrl = "http://127.0.0.1:${server.address.port}",
+                        timeoutSeconds = 5,
+                    ),
+                )
+
+                repeat(2) {
+                    MedicalImageAnalyzerTool.execute(
+                        MedicalImageAnalyzerTool.Args(
+                            imagePath = dataUrl,
+                            imageType = ImageType.XRAY,
+                            hospitalId = "H-SEG",
+                            patientId = "P-SEG",
+                            patientName = "分割测试",
+                        ),
+                    )
+                }
+
+                val requestIds = receivedRequestBodies.map(::extractRequestId)
+                assertEquals(2, requestIds.size)
+                assertNotEquals(requestIds[0], requestIds[1])
+            } finally {
+                server.stop(0)
+                Files.deleteIfExists(imagePath)
+            }
+        }
+    }
+
+    @Test
+    fun `should reject limited segmentation quality gate before formal report`() {
+        runBlocking {
+            val imagePath = createSampleImage()
+            val server = startFakeSegmentationService(
+                receivedRequestBodies = mutableListOf(),
+                serviceStatus = "limited",
+                qualityGateStatus = "LIMITED",
+            )
+
+            try {
+                MedicalImageAnalyzerTool.configureSegmentationService(
+                    SegmentationServiceSettings(
+                        enabled = true,
+                        baseUrl = "http://127.0.0.1:${server.address.port}",
+                        timeoutSeconds = 5,
+                    ),
+                )
+
+                val rawResult = MedicalImageAnalyzerTool.execute(
+                    MedicalImageAnalyzerTool.Args(
+                        imagePath = toDataUrl(imagePath),
+                        imageType = ImageType.XRAY,
+                        hospitalId = "H-SEG",
+                        patientId = "P-SEG",
+                        patientName = "分割测试",
+                    ),
+                )
+                val payload = toolJson.decodeFromString(ToolErrorResponse.serializer(), rawResult)
+
+                assertEquals("ANALYSIS_FAILED", payload.errorCode)
+                assertContains(payload.detail.orEmpty(), "分割服务质量门禁未通过")
+            } finally {
+                server.stop(0)
+                Files.deleteIfExists(imagePath)
+            }
+        }
+    }
+
+    @Test
+    fun `should reject unloaded segmentation weights before formal report`() {
+        runBlocking {
+            val imagePath = createSampleImage()
+            val server = startFakeSegmentationService(
+                receivedRequestBodies = mutableListOf(),
+                weightsLoaded = false,
+            )
+
+            try {
+                MedicalImageAnalyzerTool.configureSegmentationService(
+                    SegmentationServiceSettings(
+                        enabled = true,
+                        baseUrl = "http://127.0.0.1:${server.address.port}",
+                        timeoutSeconds = 5,
+                    ),
+                )
+
+                val rawResult = MedicalImageAnalyzerTool.execute(
+                    MedicalImageAnalyzerTool.Args(
+                        imagePath = toDataUrl(imagePath),
+                        imageType = ImageType.XRAY,
+                        hospitalId = "H-SEG",
+                        patientId = "P-SEG",
+                        patientName = "分割测试",
+                    ),
+                )
+                val payload = toolJson.decodeFromString(ToolErrorResponse.serializer(), rawResult)
+
+                assertEquals("ANALYSIS_FAILED", payload.errorCode)
+                assertContains(payload.detail.orEmpty(), "未加载训练权重")
+            } finally {
+                server.stop(0)
+                Files.deleteIfExists(imagePath)
+            }
+        }
+    }
+
+    @Test
+    fun `should reject mock segmentation backend before formal report`() {
+        runBlocking {
+            val imagePath = createSampleImage()
+            val server = startFakeSegmentationService(
+                receivedRequestBodies = mutableListOf(),
+                backend = "mock",
+            )
+
+            try {
+                MedicalImageAnalyzerTool.configureSegmentationService(
+                    SegmentationServiceSettings(
+                        enabled = true,
+                        baseUrl = "http://127.0.0.1:${server.address.port}",
+                        timeoutSeconds = 5,
+                    ),
+                )
+
+                val rawResult = MedicalImageAnalyzerTool.execute(
+                    MedicalImageAnalyzerTool.Args(
+                        imagePath = toDataUrl(imagePath),
+                        imageType = ImageType.XRAY,
+                        hospitalId = "H-SEG",
+                        patientId = "P-SEG",
+                        patientName = "分割测试",
+                    ),
+                )
+                val payload = toolJson.decodeFromString(ToolErrorResponse.serializer(), rawResult)
+
+                assertEquals("ANALYSIS_FAILED", payload.errorCode)
+                assertContains(payload.detail.orEmpty(), "mock 后端")
             } finally {
                 server.stop(0)
                 Files.deleteIfExists(imagePath)
@@ -284,14 +441,26 @@ class MedicalImageToolChainTest {
         return "data:image/png;base64,${Base64.getEncoder().encodeToString(bytes)}"
     }
 
-    private fun startFakeSegmentationService(receivedRequestBody: AtomicReference<String>): HttpServer {
+    private fun startFakeSegmentationService(
+        receivedRequestBodies: MutableList<String>,
+        serviceStatus: String = "completed",
+        qualityGateStatus: String = "PASS",
+        weightsLoaded: Boolean = true,
+        backend: String = "torch_unet",
+    ): HttpServer {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/api/v1/segment") { exchange ->
             val requestBody = exchange.requestBody.use { inputStream ->
                 String(inputStream.readBytes(), UTF_8)
             }
-            receivedRequestBody.set(requestBody)
-            val responseBody = fakeSegmentationResponse().toByteArray(UTF_8)
+            receivedRequestBodies += requestBody
+            val responseBody = fakeSegmentationResponse(
+                requestBody = requestBody,
+                serviceStatus = serviceStatus,
+                qualityGateStatus = qualityGateStatus,
+                weightsLoaded = weightsLoaded,
+                backend = backend,
+            ).toByteArray(UTF_8)
             exchange.responseHeaders.add("Content-Type", "application/json")
             exchange.sendResponseHeaders(200, responseBody.size.toLong())
             exchange.responseBody.use { outputStream ->
@@ -302,11 +471,18 @@ class MedicalImageToolChainTest {
         return server
     }
 
-    private fun fakeSegmentationResponse(): String {
+    private fun fakeSegmentationResponse(
+        requestBody: String,
+        serviceStatus: String,
+        qualityGateStatus: String,
+        weightsLoaded: Boolean,
+        backend: String,
+    ): String {
+        val requestId = extractRequestId(requestBody)
         return """
             {
-              "request_id": "SEG-TEST",
-              "status": "completed",
+              "request_id": "$requestId",
+              "status": "$serviceStatus",
               "message": "Segmentation completed: test quality gate passed.",
               "hospital_id": "H-SEG",
               "patient_id": "P-SEG",
@@ -315,14 +491,14 @@ class MedicalImageToolChainTest {
               "model": {
                 "name": "test-unet",
                 "version": "1.0",
-                "backend": "mock",
+                "backend": "$backend",
                 "device": "cpu",
                 "input_height": 256,
                 "input_width": 256,
                 "in_channels": 1,
                 "output_classes": 1,
                 "weights_path": null,
-                "weights_loaded": true
+                "weights_loaded": $weightsLoaded
               },
               "timing": {
                 "preprocess_ms": 4,
@@ -330,7 +506,7 @@ class MedicalImageToolChainTest {
                 "postprocess_ms": 3
               },
               "quality_gate": {
-                "status": "PASS",
+                "status": "$qualityGateStatus",
                 "reason": "Segmentation passed contract test"
               },
               "artifacts": {
@@ -364,5 +540,13 @@ class MedicalImageToolChainTest {
               ]
             }
         """.trimIndent()
+    }
+
+    private fun extractRequestId(requestBody: String): String {
+        return Regex(""""request_id"\s*:\s*"([^"]+)"""")
+            .find(requestBody)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: ""
     }
 }
