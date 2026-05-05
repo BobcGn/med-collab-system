@@ -244,6 +244,17 @@ export const authApi = {
     body: JSON.stringify({ token }),
   }),
 
+  // 向指定用户发送通知（患者登记后通知医生）
+  sendNotification: ({ userId, title, content, type }) => request('/notifications/send', {
+    method: 'POST',
+    body: JSON.stringify({ userId, title, content, type: type || 'patient_registration' }),
+  }),
+
+  // 获取科室前台/挂号人员列表
+  getDepartmentReceptionists: (hospitalId, deptCode) => request(`/users/receptionists/${hospitalId}/${deptCode}`, {
+    method: 'GET',
+  }),
+
   // ============ 医院相关 API ============
   // 获取所有医院
   getAllHospitals: (includeInactive = false) => {

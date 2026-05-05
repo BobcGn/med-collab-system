@@ -472,14 +472,14 @@ function trimToEmpty(value) {
   return `${value || ''}`.trim()
 }
 
-function buildLoginUsername({ role, hospitalId, deptCode, serialNumber }) {
+function buildLoginUsername({ role, userType, hospitalId, deptCode, serialNumber }) {
   const normalizedSerialNumber = trimToEmpty(serialNumber)
   if (!normalizedSerialNumber) {
     return ''
   }
 
   if (role === 'admin') {
-    return `admin-${normalizedSerialNumber}`
+    return `ADMIN-${normalizedSerialNumber}`
   }
 
   const normalizedHospitalId = trimToEmpty(hospitalId)
@@ -488,7 +488,8 @@ function buildLoginUsername({ role, hospitalId, deptCode, serialNumber }) {
     return ''
   }
 
-  return `${normalizedHospitalId}-${normalizedDeptCode}-${normalizedSerialNumber}`
+  const prefix = userType === 'nurse' ? 'NR' : userType === 'receptionist' ? 'RC' : 'DR'
+  return `${prefix}-${normalizedHospitalId}-${normalizedDeptCode}-${normalizedSerialNumber}`
 }
 
 function getLoginErrorMessage(error) {
@@ -522,6 +523,9 @@ function buildLoginPrefillSearch(account) {
     }
     if (account?.deptCode) {
       params.set('deptCode', account.deptCode)
+    }
+    if (account?.role && !['admin', 'user'].includes(account.role)) {
+      params.set('userType', account.role)
     }
   }
   if (account?.serialNumber) {
@@ -656,6 +660,41 @@ function statusClassName(value) {
   return `status-pill ${value || 'unknown'}`
 }
 
+// ============ 名称解析 Hook（ID → 名称缓存） ============
+function useNameResolver() {
+  const [cache] = useState(() => new Map())
+
+  const resolve = async (type, id) => {
+    if (!id) return id || '-'
+    const cacheKey = `${type}:${id}`
+    if (cache.has(cacheKey)) return cache.get(cacheKey)
+
+    try {
+      let name = id
+      if (type === 'hospital') {
+        const hospital = await authApi.getHospitalById(id)
+        name = hospital?.name || id
+      } else if (type === 'doctor') {
+        const user = await authApi.getUserById(id)
+        name = user?.fullName || user?.username || id
+      } else if (type === 'department') {
+        const dept = await authApi.getDepartmentById(id)
+        name = dept?.name || id
+      }
+      cache.set(cacheKey, name)
+      return name
+    } catch {
+      return id
+    }
+  }
+
+  const resolveHospitalName = (hospitalId) => resolve('hospital', hospitalId)
+  const resolveDoctorName = (doctorId) => resolve('doctor', doctorId)
+  const resolveDepartmentName = (deptCode) => resolve('department', deptCode)
+
+  return { resolveHospitalName, resolveDoctorName, resolveDepartmentName }
+}
+
 function useNotificationsSnapshot() {
   const [notifications, setNotifications] = useState(loadSystemNotifications())
   const [connectionStatus, setConnectionStatus] = useState('connecting')
@@ -679,7 +718,8 @@ function useNotificationsSnapshot() {
         const payload = JSON.parse(event.data)
         if (payload.type === 'snapshot') {
           setNotifications(replaceSystemNotifications(payload.notifications || []))
-        } else if (payload.type === 'announcement' && payload.notification) {
+        } else if (payload.notification) {
+          // 处理所有含 notification 的消息类型（announcement, patient_registration 等）
           setNotifications(mergeSystemNotification(payload.notification))
         }
       } catch (_error) {
@@ -900,6 +940,7 @@ function resolveRoute(pathname) {
     '/manage/hospitals': { title: '医院科室管理', component: HospitalManagePage, requiresAuth: true, requiredRole: ADMIN_ROLE },
     '/patients': { title: '患者管理', component: PatientManagePage, requiresAuth: true },
     '/patients/list': { title: '患者列表', component: PatientListPage, requiresAuth: true },
+    '/registration': { title: '患者登记', component: RegistrationPage, requiresAuth: true },
     '/reports': { title: '报表管理', component: ReportManagePage, requiresAuth: true },
     '/metric/images': { title: '医学影像管理', component: MedicalImageManagePage, requiresAuth: true },
     '/metric/images/chat': { title: '医学影像分析', component: MedicalImageChatPage, requiresAuth: true },
@@ -1053,6 +1094,13 @@ function AppShell({ routeTitle, children }) {
               </>
             ) : (
               <>
+                {(auth.user?.role === 'receptionist' || auth.user?.role === 'nurse') ? (
+                  <SidebarButton
+                    label="患者登记"
+                    active={location.pathname === '/registration'}
+                    onClick={() => navigate('/registration')}
+                  />
+                ) : null}
                 <SidebarGroup
                   label="患者管理"
                   active={location.pathname.startsWith('/patients')}
@@ -1144,6 +1192,7 @@ function LoginPage({ redirectTo }) {
   const { location, navigate } = useRouter()
   const [formData, setFormData] = useState({
     role: 'user',
+    userType: 'doctor',
     hospitalId: '',
     deptCode: '',
     serialNumber: '',
@@ -1157,6 +1206,7 @@ function LoginPage({ redirectTo }) {
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     const role = params.get('role') === 'admin' ? 'admin' : 'user'
+    const userType = params.get('userType') || 'doctor'
     const serialNumber = trimToEmpty(params.get('serialNumber'))
     const hospitalId = trimToEmpty(params.get('hospitalId'))
     const deptCode = trimToEmpty(params.get('deptCode'))
@@ -1168,6 +1218,7 @@ function LoginPage({ redirectTo }) {
     setFormData((current) => ({
       ...current,
       role,
+      userType: role === 'admin' ? '' : userType,
       hospitalId: role === 'admin' ? '' : hospitalId,
       deptCode: role === 'admin' ? '' : deptCode,
       serialNumber,
@@ -1229,7 +1280,16 @@ function LoginPage({ redirectTo }) {
 
       authStore.setToken(result.token)
       authStore.setCurrentUser(result.user)
-      navigate(redirectTo || '/dashboard', { replace: true })
+
+      // 根据角色跳转到不同首页
+      const userRole = result.user?.role
+      const redirectMap = {
+        admin: redirectTo || '/dashboard',
+        doctor: redirectTo || '/patients/list',
+        nurse: redirectTo || '/patients/list',
+        receptionist: redirectTo || '/registration',
+      }
+      navigate(redirectMap[userRole] || redirectTo || '/dashboard', { replace: true })
     } catch (error) {
       setErrorMessage(getLoginErrorMessage(error))
     } finally {
@@ -1302,6 +1362,18 @@ function LoginPage({ redirectTo }) {
                       {department.name}
                     </option>
                   ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>用户类型</span>
+                <select
+                  value={formData.userType}
+                  onChange={(event) => setFormData((current) => ({ ...current, userType: event.target.value }))}
+                  required
+                >
+                  <option value="doctor">医生</option>
+                  <option value="nurse">护士</option>
+                  <option value="receptionist">前台/挂号</option>
                 </select>
               </label>
             </>
@@ -1426,8 +1498,8 @@ function RegisterPage() {
       })
 
       const username = response?.user?.username || ''
-      const serialNumber = username.startsWith('admin-')
-        ? username.slice('admin-'.length)
+      const serialNumber = username.startsWith('ADMIN-')
+        ? username.slice('ADMIN-'.length)
         : username.split('-').pop() || username
 
       setRegisteredAccount({
@@ -1601,6 +1673,259 @@ function RegisterPage() {
           </AppLink>
         </div>
       </form>
+    </div>
+  )
+}
+
+function RegistrationPage() {
+  const { navigate } = useRouter()
+  const auth = useAuthState()
+  const user = auth.user
+  const [hospitals, setHospitals] = useState([])
+  const [departments, setDepartments] = useState([])
+  const [doctors, setDoctors] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [success, setSuccess] = useState(null)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({
+    name: '',
+    gender: 'M',
+    birthDate: '',
+    phone: '',
+    idCard: '',
+    hospitalId: user?.hospitalId || '',
+    department: user?.deptCode || '',
+    doctorId: '',
+  })
+
+  // 加载医院列表
+  useEffect(() => {
+    authApi.getAllHospitals()
+      .then(setHospitals)
+      .catch(() => setError('加载医院列表失败'))
+  }, [])
+
+  // 选择医院后加载科室
+  useEffect(() => {
+    if (!form.hospitalId) {
+      setDepartments([])
+      setForm((prev) => ({ ...prev, department: '', doctorId: '' }))
+      return
+    }
+    authApi.getHospitalDepartments(form.hospitalId)
+      .then((depts) => {
+        setDepartments(depts)
+        // 如果用户已有科室且在科室列表中，自动选中
+        if (form.department && depts.some((d) => d.deptCode === form.department || d.id === form.department)) {
+          // keep current department
+        }
+      })
+      .catch(() => setError('加载科室列表失败'))
+  }, [form.hospitalId])
+
+  // 选择科室后加载医生
+  useEffect(() => {
+    if (!form.hospitalId || !form.department) {
+      setDoctors([])
+      setForm((prev) => ({ ...prev, doctorId: '' }))
+      return
+    }
+    authApi.getDepartmentDoctors(form.hospitalId, form.department)
+      .then(setDoctors)
+      .catch(() => setError('加载医生列表失败'))
+  }, [form.hospitalId, form.department])
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSubmitting(true)
+    try {
+      if (!form.name.trim()) throw new Error('请输入患者姓名')
+      if (!form.doctorId) throw new Error('请选择主治医生')
+
+      // 生成病历号
+      const now = new Date()
+      const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+      const randomStr = String(Math.floor(Math.random() * 10000)).padStart(4, '0')
+      const patientId = `MRN-${dateStr}-${randomStr}`
+
+      const payload = {
+        hospitalId: form.hospitalId,
+        patientId,
+        name: form.name.trim(),
+        gender: form.gender,
+        birthDate: form.birthDate || null,
+        phone: form.phone.replace(/\D/g, '') || null,
+        idCard: form.idCard.replace(/\s/g, '') || null,
+        department: form.department,
+        attendingDoctorId: form.doctorId,
+      }
+
+      const createdPatient = await patientApi.createPatient(payload)
+
+      // 通知医生
+      const doctor = doctors.find((d) => d.id === form.doctorId || d.userId === form.doctorId)
+      const doctorUserId = doctor?.userId || form.doctorId
+
+      authApi.sendNotification({
+        userId: doctorUserId,
+        title: '新患者登记',
+        content: `前台 ${user?.fullName || ''} 为您登记了新患者：${form.name}（病历号：${patientId}）`,
+        type: 'patient_registration',
+      }).catch((notifyErr) => {
+        console.warn('通知医生失败（不影响登记）:', notifyErr)
+      })
+
+      setSuccess({
+        patientId,
+        name: form.name.trim(),
+        doctorName: doctor?.fullName || doctor?.name || '已选医生',
+      })
+    } catch (err) {
+      setError(err.message || '登记失败，请重试')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (success) {
+    return (
+      <div className="page-container">
+        <div className="card">
+          <div className="card-header">
+            <h2>登记成功</h2>
+          </div>
+          <div className="card-body">
+            <div className="alert-banner success-banner">
+              患者 <strong>{success.name}</strong>（病历号：{success.patientId}）已成功登记，
+              已通知医生 <strong>{success.doctorName}</strong>。
+            </div>
+            <div className="form-actions" style={{ marginTop: '16px' }}>
+              <button type="button" className="button button-primary" onClick={() => { setSuccess(null); setForm({ name: '', gender: 'M', birthDate: '', phone: '', idCard: '', hospitalId: user?.hospitalId || '', department: user?.deptCode || '', doctorId: '' }) }}>
+                继续登记
+              </button>
+              <button type="button" className="button button-secondary" onClick={() => navigate('/patients/list')}>
+                查看患者列表
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="page-container">
+      <div className="card">
+        <div className="card-header">
+          <h2>患者登记</h2>
+          <p className="text-secondary">为就诊患者创建档案，登记后将通知对应医生</p>
+        </div>
+        <form className="card-body" onSubmit={handleSubmit}>
+          {error ? <div className="alert-banner error-banner">{error}</div> : null}
+
+          <div className="form-grid two-column">
+            <label className="field">
+              <span>患者姓名 <span className="required-mark">*</span></span>
+              <input
+                value={form.name}
+                onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="请输入患者姓名"
+                required
+              />
+            </label>
+
+            <label className="field">
+              <span>性别 <span className="required-mark">*</span></span>
+              <select
+                value={form.gender}
+                onChange={(e) => setForm((prev) => ({ ...prev, gender: e.target.value }))}
+              >
+                <option value="M">男</option>
+                <option value="F">女</option>
+              </select>
+            </label>
+
+            <label className="field">
+              <span>出生日期</span>
+              <input
+                type="date"
+                value={form.birthDate}
+                onChange={(e) => setForm((prev) => ({ ...prev, birthDate: e.target.value }))}
+              />
+            </label>
+
+            <label className="field">
+              <span>联系电话</span>
+              <input
+                value={form.phone}
+                onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+                placeholder="请输入11位手机号"
+              />
+            </label>
+
+            <label className="field">
+              <span>身份证号</span>
+              <input
+                value={form.idCard}
+                onChange={(e) => setForm((prev) => ({ ...prev, idCard: e.target.value }))}
+                placeholder="请输入身份证号（选填）"
+              />
+            </label>
+
+            <label className="field">
+              <span>所属医院 <span className="required-mark">*</span></span>
+              <select
+                value={form.hospitalId}
+                onChange={(e) => setForm((prev) => ({ ...prev, hospitalId: e.target.value, department: '', doctorId: '' }))}
+                required
+              >
+                <option value="">请选择医院</option>
+                {hospitals.map((h) => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>所属科室 <span className="required-mark">*</span></span>
+              <select
+                value={form.department}
+                onChange={(e) => setForm((prev) => ({ ...prev, department: e.target.value, doctorId: '' }))}
+                required
+                disabled={!form.hospitalId}
+              >
+                <option value="">{form.hospitalId ? '请选择科室' : '请先选择医院'}</option>
+                {departments.map((d) => (
+                  <option key={d.id} value={d.deptCode || d.id}>{d.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>主治医生 <span className="required-mark">*</span></span>
+              <select
+                value={form.doctorId}
+                onChange={(e) => setForm((prev) => ({ ...prev, doctorId: e.target.value }))}
+                required
+                disabled={!form.department}
+              >
+                <option value="">{form.department ? '请选择医生' : '请先选择科室'}</option>
+                {doctors.map((d) => (
+                  <option key={d.id} value={d.userId || d.id}>{d.fullName || d.name}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="form-actions">
+            <button type="submit" className="button button-primary" disabled={submitting}>
+              {submitting ? '提交中...' : '确认登记'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
@@ -3010,6 +3335,10 @@ function useCurrentMedicalContext() {
 function PatientManagePage() {
   const { location } = useRouter()
   const searchParams = new URLSearchParams(location.search)
+  const auth = useAuthState()
+  const isAdmin = auth.user?.role === ADMIN_ROLE
+  const isDoctor = auth.user?.role === 'doctor'
+  const canModifyOrCreate = isAdmin || auth.user?.role === 'receptionist'
   const {
     currentHospital,
     currentDoctor,
@@ -3243,9 +3572,11 @@ function PatientManagePage() {
             <h2>患者管理</h2>
             <p>维护患者基础信息、就诊信息、状态和病史摘要。</p>
           </div>
-          <button type="button" className="button button-primary" onClick={openCreatePatient}>
-            新增患者
-          </button>
+          {canModifyOrCreate ? (
+            <button type="button" className="button button-primary" onClick={openCreatePatient}>
+              新增患者
+            </button>
+          ) : null}
         </div>
 
         <div className="toolbar-row">
@@ -3305,18 +3636,24 @@ function PatientManagePage() {
                             <button type="button" className="button button-secondary small" onClick={() => setModal({ type: 'view', payload: patient })}>
                               查看
                             </button>
-                            <button type="button" className="button button-secondary small" onClick={() => openEditPatient(patient)}>
-                              编辑
-                            </button>
-                            <button type="button" className="button button-secondary small" onClick={() => {
-                              setNewStatus(patient.status || 'Active')
-                              setModal({ type: 'status', payload: patient })
-                            }}>
-                              状态
-                            </button>
-                            <button type="button" className="button button-danger small" onClick={() => setModal({ type: 'delete', payload: patient })}>
-                              删除
-                            </button>
+                            {canModifyOrCreate ? (
+                              <button type="button" className="button button-secondary small" onClick={() => openEditPatient(patient)}>
+                                编辑
+                              </button>
+                            ) : null}
+                            {canModifyOrCreate ? (
+                              <button type="button" className="button button-secondary small" onClick={() => {
+                                setNewStatus(patient.status || 'Active')
+                                setModal({ type: 'status', payload: patient })
+                              }}>
+                                状态
+                              </button>
+                            ) : null}
+                            {canModifyOrCreate ? (
+                              <button type="button" className="button button-danger small" onClick={() => setModal({ type: 'delete', payload: patient })}>
+                                删除
+                              </button>
+                            ) : null}
                           </TableActions>
                         </td>
                       </tr>
@@ -3454,14 +3791,14 @@ function PatientManagePage() {
       <Modal open={modal.type === 'view'} title="患者详情" onClose={() => closeModal()}>
         {modal.payload ? (
           <div className="detail-grid">
-            <ProfileField label="患者 ID" value={modal.payload.id} />
+            <ProfileField label="病历号" value={modal.payload.patientId || modal.payload.id} />
             <ProfileField label="患者姓名" value={modal.payload.name} />
             <ProfileField label="性别" value={formatGender(modal.payload.gender)} />
             <ProfileField label="年龄" value={modal.payload.age || calculateAge(modal.payload.birthDate)} />
             <ProfileField label="血型" value={formatBloodType(modal.payload.bloodType)} />
             <ProfileField label="联系电话" value={modal.payload.phone} />
-            <ProfileField label="主治医生" value={modal.payload.attendingDoctorName || modal.payload.doctorId} />
-            <ProfileField label="所属医院" value={modal.payload.hospitalId} />
+            <ProfileField label="主治医生" value={modal.payload.attendingDoctorName || modal.payload.attendingDoctorId || modal.payload.doctorId} />
+            <ProfileField label="所属医院" value={modal.payload.hospitalName || modal.payload.hospitalId} />
             <ProfileField label="状态" value={formatPatientStatus(modal.payload.status)} />
             <ProfileField label="入院时间" value={formatDateTime(modal.payload.admissionDate)} />
             <ProfileField label="更新时间" value={formatDateTime(modal.payload.updatedAt)} />
@@ -3505,6 +3842,8 @@ function PatientManagePage() {
 
 function PatientListPage() {
   const { navigate } = useRouter()
+  const auth = useAuthState()
+  const canModifyOrCreate = auth.user?.role === ADMIN_ROLE || auth.user?.role === 'receptionist'
   const [patients, setPatients] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -3683,18 +4022,24 @@ function PatientListPage() {
                             <button type="button" className="button button-secondary small" onClick={() => setModal({ type: 'view', payload: patient })}>
                               查看
                             </button>
-                            <button type="button" className="button button-secondary small" onClick={() => navigate(`/patients?action=edit&id=${encodeURIComponent(patient.id)}`)}>
-                              编辑
-                            </button>
-                            <button type="button" className="button button-secondary small" onClick={() => {
-                              setNewStatus(patient.status || 'Active')
-                              setModal({ type: 'status', payload: patient })
-                            }}>
-                              状态
-                            </button>
-                            <button type="button" className="button button-danger small" onClick={() => setModal({ type: 'delete', payload: patient })}>
-                              删除
-                            </button>
+                            {canModifyOrCreate ? (
+                              <button type="button" className="button button-secondary small" onClick={() => navigate(`/patients?action=edit&id=${encodeURIComponent(patient.id)}`)}>
+                                编辑
+                              </button>
+                            ) : null}
+                            {canModifyOrCreate ? (
+                              <button type="button" className="button button-secondary small" onClick={() => {
+                                setNewStatus(patient.status || 'Active')
+                                setModal({ type: 'status', payload: patient })
+                              }}>
+                                状态
+                              </button>
+                            ) : null}
+                            {canModifyOrCreate ? (
+                              <button type="button" className="button button-danger small" onClick={() => setModal({ type: 'delete', payload: patient })}>
+                                删除
+                              </button>
+                            ) : null}
                           </TableActions>
                         </td>
                       </tr>
@@ -3711,7 +4056,7 @@ function PatientListPage() {
       <Modal open={modal.type === 'view'} title="患者详情" onClose={closeModal}>
         {modal.payload ? (
           <div className="detail-grid">
-            <ProfileField label="患者 ID" value={modal.payload.id} />
+            <ProfileField label="病历号" value={modal.payload.patientId || modal.payload.id} />
             <ProfileField label="患者姓名" value={modal.payload.name} />
             <ProfileField label="性别" value={formatGender(modal.payload.gender)} />
             <ProfileField label="年龄" value={modal.payload.age || calculateAge(modal.payload.birthDate)} />
@@ -4049,7 +4394,7 @@ function AnalysisResultDetailPage() {
           </button>
         </div>
         <div className="detail-grid">
-          <ProfileField label="患者 ID" value={patientId || patient?.id} />
+          <ProfileField label="病历号" value={patientId || patient?.patientId || patient?.id} />
           <ProfileField label="姓名" value={patient?.name || patientName} />
           <ProfileField label="性别" value={formatGender(patient?.gender)} />
           <ProfileField label="年龄" value={patient?.age || calculateAge(patient?.birthDate)} />

@@ -294,6 +294,14 @@ fun Application.configureRouting() {
                     val nurses = userService.getDepartmentNurses(hospitalId, deptCode)
                     call.respond(HttpStatusCode.OK, nurses)
                 }
+
+                // 获取科室前台列表
+                get("/users/receptionists/{hospitalId}/{deptCode}") {
+                    val hospitalId = call.parameters["hospitalId"] ?: throw Exception("缺少医院ID")
+                    val deptCode = call.parameters["deptCode"] ?: throw Exception("缺少科室代码")
+                    val receptionists = userService.getDepartmentReceptionists(hospitalId, deptCode)
+                    call.respond(HttpStatusCode.OK, receptionists)
+                }
                 
                 // 获取医院所有用户
                 get("/users/hospital/{hospitalId}") {
@@ -481,6 +489,39 @@ fun Application.configureRouting() {
                     } else {
                         call.respond(HttpStatusCode.NotFound, mapOf("error" to "部门不存在"))
                     }
+                }
+
+                // ============ 通知推送 API ============
+                post("/notifications/send") {
+                    val principal = call.principal<JWTPrincipal>()
+                    val senderId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
+                    val senderName = jwtUtil.getUsernameFromToken(principal!!.payload)
+
+                    val request = call.receive<Map<String, String>>()
+                    val targetUserId = request["userId"] ?: throw Exception("缺少目标用户ID")
+                    val title = request["title"]?.trim() ?: throw Exception("缺少通知标题")
+                    val content = request["content"]?.trim() ?: throw Exception("缺少通知内容")
+                    val notificationType = request["type"]?.trim() ?: "system"
+
+                    val notification = SystemNotificationMessage(
+                        id = UUID.randomUUID().toString(),
+                        title = title,
+                        content = content,
+                        priority = "normal",
+                        createdAt = LocalDateTime.now().toString(),
+                        senderId = senderId,
+                        senderName = senderName ?: senderId,
+                    )
+
+                    val envelope = NotificationSocketEnvelope(
+                        type = notificationType,
+                        message = content,
+                        notification = notification,
+                    )
+
+                    SystemNotificationHub.sendToUser(targetUserId, envelope)
+
+                    call.respond(HttpStatusCode.OK, mapOf("success" to true))
                 }
             }
     }

@@ -15,11 +15,17 @@ class PatientService(
      * 创建新患者
      *
      * 业务规则：
-     * 1. 检查患者是否已存在（同一医院下病历号唯一）
-     * 2. 验证医生ID是否有效
-     * 3. 创建患者记录
+     * 1. 仅管理员和前台/挂号人员可以创建
+     * 2. 检查患者是否已存在（同一医院下病历号唯一）
+     * 3. 验证医生ID是否有效
+     * 4. 创建患者记录
      */
-    suspend fun createPatient(patient: PatientDto.CreatePatient, token: String? = null): PatientDto.PatientInfo {
+    suspend fun createPatient(patient: PatientDto.CreatePatient, operatorId: String, token: String? = null): PatientDto.PatientInfo {
+        // 权限检查 - 仅 admin 和 receptionist 可以创建
+        if (!authClient.canCreatePatient(operatorId, token)) {
+            throw PatientException.PermissionDeniedException()
+        }
+
         // 检查患者是否已存在
         if (patientRepository.existsByHospitalAndPatientId(patient.hospitalId, patient.patientId)) {
             throw PatientException.PatientAlreadyExistsException()

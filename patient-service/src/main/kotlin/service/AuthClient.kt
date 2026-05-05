@@ -144,7 +144,10 @@ class AuthClient(
 
     /**
      * 检查用户是否可以修改患者
-     * 比查看更严格，只有主治医生或管理员可以修改
+     * 规则：
+     * 1. 管理员可以修改所有患者
+     * 2. 前台/挂号人员可以修改
+     * 3. 医生不可修改（仅查看）
      */
     suspend fun canModifyPatient(
         requesterId: String,
@@ -158,8 +161,28 @@ class AuthClient(
             return true
         }
 
-        // 只有主治医生可以修改患者
-        return requesterId == patientAttendingDoctorId
+        // 前台/挂号人员可以修改患者
+        if (requester.role == "receptionist") {
+            return true
+        }
+
+        // 医生不可修改（只读）
+        return false
+    }
+
+    /**
+     * 检查用户是否可以创建患者
+     * 规则：
+     * 1. 管理员可以创建
+     * 2. 前台/挂号人员可以创建
+     * 3. 医生/护士不可创建
+     */
+    suspend fun canCreatePatient(
+        requesterId: String,
+        token: String? = null
+    ): Boolean {
+        val requester = getUserInfo(requesterId, token) ?: return false
+        return requester.role == "admin" || requester.role == "receptionist"
     }
 
     /**

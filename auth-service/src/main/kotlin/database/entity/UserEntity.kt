@@ -20,9 +20,22 @@ class UserEntity(id: EntityID<String>) : Entity<String>(id) {
     var createdAt by Users.createdAt
     var updatedAt by Users.updatedAt
 
-    // 计算属性: username (管理员为 admin-{user_seq}，普通用户为 {hospitalId}-{deptCode}-{userSeq})
+    // 计算属性: username (含角色前缀)
+    // admin -> ADMIN-{userSeq}
+    // doctor -> DR-{hospitalId}-{deptCode}-{userSeq}
+    // nurse -> NR-{hospitalId}-{deptCode}-{userSeq}
+    // receptionist -> RC-{hospitalId}-{deptCode}-{userSeq}
     val username: String
-        get() = if (hospitalId == null) "admin-$userSeq" else "$hospitalId-$deptCode-$userSeq"
+        get() {
+            if (hospitalId == null) return "ADMIN-$userSeq"
+            val prefix = when (role) {
+                "doctor" -> "DR"
+                "nurse" -> "NR"
+                "receptionist" -> "RC"
+                else -> "USR"
+            }
+            return "$prefix-$hospitalId-$deptCode-$userSeq"
+        }
 
     fun UserEntity.toUserInfo() = UserDto.UserInfo(
         id = id.value,

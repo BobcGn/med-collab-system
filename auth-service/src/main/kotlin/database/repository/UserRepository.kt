@@ -123,52 +123,32 @@ class UserRepository(
      */
     suspend fun findUserByUsername(username: String): UserDto.UserInfo? {
         return try {
-            // 解析 username: hospitalId-deptCode-userSeq
             val parts = username.split("-")
-            if (parts.size != 3) {
+
+            if (parts.size == 2 && parts[0] == "ADMIN") {
+                val userSeq = parts[1]
+                return transaction {
+                    UserEntity.find {
+                        (Users.hospitalId.isNull()) and
+                        (Users.deptCode.isNull()) and
+                        (Users.userSeq eq userSeq)
+                    }.firstOrNull()?.let { entity -> buildUserInfo(entity) }
+                }
+            }
+
+            if (parts.size != 4) {
                 return null
             }
 
-            val (hospitalId, deptCode, userSeq) = parts
+            val (_, hospitalId, deptCode, userSeq) = parts
 
-            transaction {
+            return transaction {
                 UserEntity.find {
                     (Users.hospitalId eq hospitalId) and
                             (Users.deptCode eq deptCode) and
                             (Users.userSeq eq userSeq)
                 }.firstOrNull()?.let { entity ->
-                    // 获取医院名称
-                    val hospitalName = if (entity.hospitalId != null) {
-                        HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
-                    } else {
-                        null
-                    }
-
-                    // 获取科室名称
-                    val deptName = if (entity.hospitalId != null && entity.deptCode != null) {
-                        DepartmentEntity.find {
-                            (Departments.id eq entity.deptCode) and
-                            (Departments.hospitalId eq entity.hospitalId!!)
-                        }.firstOrNull()?.name ?: entity.deptCode
-                    } else {
-                        null
-                    }
-
-                    UserDto.UserInfo(
-                        id = entity.id.value,
-                        hospitalId = entity.hospitalId,
-                        deptCode = entity.deptCode,
-                        hospitalName = hospitalName,
-                        deptName = deptName,
-                        userSeq = entity.userSeq,
-                        username = entity.username,
-                        fullName = entity.fullName,
-                        role = entity.role,
-                        createdAt = entity.createdAt.toString(),
-                        updatedAt = entity.updatedAt?.toString(),
-                        isDeleted = entity.isDeleted,
-                        isFrozen = entity.isFrozen
-                    )
+                    buildUserInfo(entity)
                 }
             }
         } catch (e: Exception) {
@@ -183,21 +163,20 @@ class UserRepository(
      */
     suspend fun findUserByUsernameWithCredentials(username: String): UserDto.UserInfoWithCredentials? {
         return try {
-            // 解析 username: admin-{userSeq} 或 hospitalId-deptCode-userSeq
             val parts = username.split("-")
 
             transaction {
-                val entity = if (parts.size == 2 && parts[0] == "admin") {
-                    // 管理员账号格式: admin-{userSeq}
+                val entity = if (parts.size == 2 && parts[0] == "ADMIN") {
+                    // 管理员账号格式: ADMIN-{userSeq}
                     val userSeq = parts[1]
                     UserEntity.find {
                         (Users.hospitalId.isNull()) and
                         (Users.deptCode.isNull()) and
                         (Users.userSeq eq userSeq)
                     }.firstOrNull()
-                } else if (parts.size == 3) {
-                    // 普通用户账号格式: hospitalId-deptCode-userSeq
-                    val (hospitalId, deptCode, userSeq) = parts
+                } else if (parts.size == 4) {
+                    // 普通用户账号格式: {rolePrefix}-{hospitalId}-{deptCode}-{userSeq}
+                    val (_, hospitalId, deptCode, userSeq) = parts
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode eq deptCode) and
@@ -336,21 +315,18 @@ class UserRepository(
      */
     suspend fun existsByUsername(username: String): Boolean{
         return try {
-            // 解析 username: admin-{userSeq} 或 hospitalId-deptCode-userSeq
             val parts = username.split("-")
 
             transaction {
-                val result = if (parts.size == 2 && parts[0] == "admin") {
-                    // 管理员用户名格式: admin-{userSeq}
+                val result = if (parts.size == 2 && parts[0] == "ADMIN") {
                     val userSeq = parts[1]
                     UserEntity.find {
                         (Users.hospitalId.isNull()) and
                         (Users.deptCode.isNull()) and
                         (Users.userSeq eq userSeq)
                     }
-                } else if (parts.size == 3) {
-                    // 普通用户名格式: hospitalId-deptCode-userSeq
-                    val (hospitalId, deptCode, userSeq) = parts
+                } else if (parts.size == 4) {
+                    val (_, hospitalId, deptCode, userSeq) = parts
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode eq deptCode) and
@@ -593,5 +569,39 @@ class UserRepository(
         } catch (e: Exception) {
             throw Exception("获取用户统计信息失败")
         }
+    }
+
+    // ==================== 辅助方法 ====================
+    private fun buildUserInfo(entity: UserEntity): UserDto.UserInfo {
+        val hospitalName = if (entity.hospitalId != null) {
+            HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
+        } else {
+            null
+        }
+
+        val deptName = if (entity.hospitalId != null && entity.deptCode != null) {
+            DepartmentEntity.find {
+                (Departments.id eq entity.deptCode) and
+                (Departments.hospitalId eq entity.hospitalId!!)
+            }.firstOrNull()?.name ?: entity.deptCode
+        } else {
+            null
+        }
+
+        return UserDto.UserInfo(
+            id = entity.id.value,
+            hospitalId = entity.hospitalId,
+            deptCode = entity.deptCode,
+            hospitalName = hospitalName,
+            deptName = deptName,
+            userSeq = entity.userSeq,
+            username = entity.username,
+            fullName = entity.fullName,
+            role = entity.role,
+            createdAt = entity.createdAt.toString(),
+            updatedAt = entity.updatedAt?.toString(),
+            isDeleted = entity.isDeleted,
+            isFrozen = entity.isFrozen
+        )
     }
 }

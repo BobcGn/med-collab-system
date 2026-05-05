@@ -40,14 +40,12 @@ class UserService(
         val encryptedPassword = hashPassword(user.password)
 
         // 根据角色处理不同的注册逻辑
+        val tempUserId = System.currentTimeMillis().toString().takeLast(6)
+
         if (normalizedRole == "admin") {
             // 管理员注册
-            // 生成临时用户ID（实际会被数据库生成的ID替换）
-            val tempUserId = System.currentTimeMillis().toString().takeLast(6)
-            // 生成管理员账号：admin-用户id
-            val adminUsername = "admin-$tempUserId"
+            val adminUsername = "ADMIN-$tempUserId"
 
-            // 创建 UserCreate 对象
             val userCreate = UserDto.UserCreate(
                 hospitalId = null,
                 deptCode = null,
@@ -67,8 +65,7 @@ class UserService(
                 message = "注册成功"
             )
         } else {
-            // 普通用户注册
-            // 验证医院和科室是否有效
+            // 普通用户注册（doctor/nurse/receptionist）
             val hospitalId = user.hospitalId?.trim()?.takeIf { it.isNotEmpty() }
                 ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
             val deptCode = user.deptCode?.trim()?.takeIf { it.isNotEmpty() }
@@ -78,12 +75,15 @@ class UserService(
                 throw AuthException.HospitalOrDepartmentIdInvalidException()
             }
 
-            // 生成临时用户ID（实际会被数据库生成的ID替换）
-            val tempUserId = System.currentTimeMillis().toString().takeLast(6)
-            // 生成用户账号：医院id-部门id-用户id
-            val userUsername = "$hospitalId-$deptCode-$tempUserId"
+            // 生成带角色前缀的用户名
+            val rolePrefix = when (normalizedRole) {
+                "doctor" -> "DR"
+                "nurse" -> "NR"
+                "receptionist" -> "RC"
+                else -> "USR"
+            }
+            val userUsername = "$rolePrefix-$hospitalId-$deptCode-$tempUserId"
 
-            // 创建 UserCreate 对象
             val userCreate = UserDto.UserCreate(
                 hospitalId = hospitalId,
                 deptCode = deptCode,
@@ -260,6 +260,19 @@ class UserService(
         }
 
         return userRepository.findByHospitalAndDept(hospitalId, deptCode).filter { it.role == "nurse" }
+    }
+
+    /**
+     * 获取科室前台列表
+     * @param hospitalId
+     * @param deptCode
+     * @return List<UserDto.UserInfo>
+     */
+    suspend fun getDepartmentReceptionists(hospitalId: String, deptCode: String): List<UserDto.UserInfo> {
+        if (!validateHospital(hospitalId) || !validateDepartment(hospitalId, deptCode)) {
+            throw AuthException.HospitalOrDepartmentIdInvalidException()
+        }
+        return userRepository.findByHospitalAndDept(hospitalId, deptCode).filter { it.role == "receptionist" }
     }
 
     /**

@@ -21,6 +21,7 @@ object SystemNotificationHub {
     private val json = Json { ignoreUnknownKeys = true }
     private val sessions = ConcurrentHashMap<String, NotificationConnection>()
     private val history = CopyOnWriteArrayList<SystemNotificationMessage>()
+    private val userIdIndex = ConcurrentHashMap<String, MutableSet<String>>()
 
     suspend fun register(
         session: DefaultWebSocketServerSession,
@@ -28,11 +29,19 @@ object SystemNotificationHub {
     ): String {
         val connectionId = UUID.randomUUID().toString()
         sessions[connectionId] = NotificationConnection(session = session, user = user)
+        userIdIndex.getOrPut(user.userId) { mutableSetOf() }.add(connectionId)
         return connectionId
     }
 
     fun unregister(connectionId: String) {
-        sessions.remove(connectionId)
+        val connection = sessions.remove(connectionId)
+        if (connection != null) {
+            val userConnections = userIdIndex[connection.user.userId]
+            userConnections?.remove(connectionId)
+            if (userConnections.isNullOrEmpty()) {
+                userIdIndex.remove(connection.user.userId)
+            }
+        }
     }
 
     fun snapshot(): List<SystemNotificationMessage> = history.toList()
@@ -48,6 +57,31 @@ object SystemNotificationHub {
             user = user,
         )
         session.send(Frame.Text(json.encodeToString(payload)))
+    }
+
+    /**
+     * 向指定用户发送通知
+     */
+    suspend fun sendToUser(targetUserId: String, envelope: NotificationSocketEnvelope) {
+        val payload = json.encodeToString(envelope)
+        val userConnections = userIdIndex[targetUserId] ?: return
+        val staleConnections = mutableListOf<String>()
+
+        userConnections.forEach { connectionId ->
+            val connection = sessions[connectionId] ?: return@forEach
+            runCatching {
+                connection.session.send(Frame.Text(payload))
+            }.onFailure {
+                staleConnections += connectionId
+            }
+        }
+
+        staleConnections.forEach { connId ->
+            val conn = sessions.remove(connId)
+            if (conn != null) {
+                userIdIndex[conn.user.userId]?.remove(connId)
+            }
+        }
     }
 
     suspend fun publish(notification: SystemNotificationMessage) {

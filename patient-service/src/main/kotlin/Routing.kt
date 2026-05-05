@@ -73,10 +73,18 @@ fun Application.configureRouting() {
                     application.log.info("开始接收创建患者请求")
                     val patientCreate = call.receive<PatientDto.CreatePatient>()
                     application.log.info("接收到的患者数据: $patientCreate")
-                    // 从 JWT token 中获取认证令牌
+                    // 从 JWT token 中获取认证令牌和操作者信息
                     val principal = call.principal<JWTPrincipal>()
+                    val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少用户ID")
                     val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
-                    val result = patientService.createPatient(patientCreate, token)
+
+                    // JWT role 校验（防御性）
+                    val role = principal?.payload?.getClaim("role")?.asString() ?: ""
+                    if (role != "admin" && role != "receptionist") {
+                        throw PatientException.PermissionDeniedException()
+                    }
+
+                    val result = patientService.createPatient(patientCreate, operatorId, token)
                     application.log.info("患者创建成功: ${result.id}")
                     call.respond(HttpStatusCode.Created, result)
                 } catch (e: Exception) {
@@ -108,6 +116,13 @@ fun Application.configureRouting() {
                 val principal = call.principal<JWTPrincipal>()
                 val operatorId = principal?.payload?.subject ?: throw Exception("Token中缺少用户ID")
                 val token = call.request.headers["Authorization"]?.removePrefix("Bearer ")
+
+                // JWT role 校验 - 仅 admin 和 receptionist 可修改
+                val role = principal?.payload?.getClaim("role")?.asString() ?: ""
+                if (role != "admin" && role != "receptionist") {
+                    throw PatientException.PermissionDeniedException()
+                }
+
                 val patientUpdate = call.receive<PatientDto.UpdatePatient>()
                 val success = patientService.updatePatient(patientId, patientUpdate, operatorId, token)
                 call.respond(HttpStatusCode.OK, mapOf("success" to success))
