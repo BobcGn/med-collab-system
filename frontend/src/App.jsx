@@ -472,7 +472,7 @@ function trimToEmpty(value) {
   return `${value || ''}`.trim()
 }
 
-function buildLoginUsername({ role, userType, hospitalId, deptCode, serialNumber }) {
+function buildLoginUsername({ role, hospitalId, deptCode, serialNumber }) {
   const normalizedSerialNumber = trimToEmpty(serialNumber)
   if (!normalizedSerialNumber) {
     return ''
@@ -483,13 +483,16 @@ function buildLoginUsername({ role, userType, hospitalId, deptCode, serialNumber
   }
 
   const normalizedHospitalId = trimToEmpty(hospitalId)
-  const normalizedDeptCode = trimToEmpty(deptCode)
-  if (!normalizedHospitalId || !normalizedDeptCode) {
+  if (!normalizedHospitalId) {
     return ''
   }
 
-  const prefix = userType === 'nurse' ? 'NR' : userType === 'receptionist' ? 'RC' : 'DR'
-  return `${prefix}-${normalizedHospitalId}-${normalizedDeptCode}-${normalizedSerialNumber}`
+  const prefix = role === 'receptionist' ? 'RC' : 'DR'
+  const normalizedDeptCode = trimToEmpty(deptCode)
+  if (normalizedDeptCode) {
+    return `${prefix}-${normalizedHospitalId}-${normalizedDeptCode}-${normalizedSerialNumber}`
+  }
+  return `${prefix}-${normalizedHospitalId}-${normalizedSerialNumber}`
 }
 
 function getLoginErrorMessage(error) {
@@ -514,7 +517,7 @@ function getLoginErrorMessage(error) {
 
 function buildLoginPrefillSearch(account) {
   const params = new URLSearchParams()
-  const role = account?.role === 'admin' ? 'admin' : 'user'
+  const role = account?.role || 'doctor'
 
   params.set('role', role)
   if (role !== 'admin') {
@@ -523,9 +526,6 @@ function buildLoginPrefillSearch(account) {
     }
     if (account?.deptCode) {
       params.set('deptCode', account.deptCode)
-    }
-    if (account?.role && !['admin', 'user'].includes(account.role)) {
-      params.set('userType', account.role)
     }
   }
   if (account?.serialNumber) {
@@ -1191,8 +1191,7 @@ function SidebarSubButton({ label, active, onClick }) {
 function LoginPage({ redirectTo }) {
   const { location, navigate } = useRouter()
   const [formData, setFormData] = useState({
-    role: 'user',
-    userType: 'doctor',
+    role: 'doctor',
     hospitalId: '',
     deptCode: '',
     serialNumber: '',
@@ -1205,8 +1204,7 @@ function LoginPage({ redirectTo }) {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
-    const role = params.get('role') === 'admin' ? 'admin' : 'user'
-    const userType = params.get('userType') || 'doctor'
+    const role = params.get('role') === 'admin' ? 'admin' : params.get('role') === 'receptionist' ? 'receptionist' : 'doctor'
     const serialNumber = trimToEmpty(params.get('serialNumber'))
     const hospitalId = trimToEmpty(params.get('hospitalId'))
     const deptCode = trimToEmpty(params.get('deptCode'))
@@ -1218,7 +1216,6 @@ function LoginPage({ redirectTo }) {
     setFormData((current) => ({
       ...current,
       role,
-      userType: role === 'admin' ? '' : userType,
       hospitalId: role === 'admin' ? '' : hospitalId,
       deptCode: role === 'admin' ? '' : deptCode,
       serialNumber,
@@ -1321,15 +1318,22 @@ function LoginPage({ redirectTo }) {
               </button>
               <button
                 type="button"
-                className={formData.role === 'user' ? 'active' : ''}
-                onClick={() => setFormData((current) => ({ ...current, role: 'user' }))}
+                className={formData.role === 'doctor' ? 'active' : ''}
+                onClick={() => setFormData((current) => ({ ...current, role: 'doctor', hospitalId: '', deptCode: '' }))}
               >
-                普通用户
+                医生
+              </button>
+              <button
+                type="button"
+                className={formData.role === 'receptionist' ? 'active' : ''}
+                onClick={() => setFormData((current) => ({ ...current, role: 'receptionist', hospitalId: '', deptCode: '' }))}
+              >
+                前台
               </button>
             </div>
           </label>
 
-          {formData.role === 'user' ? (
+          {formData.role !== 'admin' ? (
             <>
               <label className="field">
                 <span>所属医院</span>
@@ -1349,38 +1353,28 @@ function LoginPage({ redirectTo }) {
                   ))}
                 </select>
               </label>
-              <label className="field">
-                <span>所属科室</span>
-                <select
-                  value={formData.deptCode}
-                  onChange={(event) => setFormData((current) => ({ ...current, deptCode: event.target.value }))}
-                  required
-                >
-                  <option value="">请选择科室</option>
-                  {departments.map((department) => (
-                    <option key={department.id} value={department.id}>
-                      {department.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>用户类型</span>
-                <select
-                  value={formData.userType}
-                  onChange={(event) => setFormData((current) => ({ ...current, userType: event.target.value }))}
-                  required
-                >
-                  <option value="doctor">医生</option>
-
-                  <option value="receptionist">前台/挂号</option>
-                </select>
-              </label>
+              {formData.role === 'doctor' ? (
+                <label className="field">
+                  <span>所属科室</span>
+                  <select
+                    value={formData.deptCode}
+                    onChange={(event) => setFormData((current) => ({ ...current, deptCode: event.target.value }))}
+                    required
+                  >
+                    <option value="">请选择科室</option>
+                    {departments.map((department) => (
+                      <option key={department.id} value={department.id}>
+                        {department.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
             </>
           ) : null}
 
           <label className="field">
-            <span>{formData.role === 'admin' ? '管理员序列号' : '用户序列号'}</span>
+            <span>{formData.role === 'admin' ? '管理员序列号' : formData.role === 'receptionist' ? '前台序列号' : '医生序列号'}</span>
             <input
               value={formData.serialNumber}
               onChange={(event) => setFormData((current) => ({ ...current, serialNumber: event.target.value }))}
