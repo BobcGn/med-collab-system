@@ -37,3 +37,9 @@ out/
 .vscode/
 .run/
 .data/
+/reports/
+/chat-histories/
+.ai/
+.claude/
+*.doc
+*.docx
