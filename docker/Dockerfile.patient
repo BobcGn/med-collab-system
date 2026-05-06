@@ -1,6 +1,7 @@
 FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /build
 COPY . .
+COPY docker/gradle-dists /root/.gradle/wrapper/dists
 RUN ./gradlew :patient-service:installDist -x test --no-daemon -q
 
 FROM eclipse-temurin:21-jre
