@@ -495,7 +495,7 @@ fun Application.configureRouting() {
                 post("/notifications/send") {
                     val principal = call.principal<JWTPrincipal>()
                     val senderId = principal?.payload?.subject ?: throw Exception("Token中缺少操作者ID")
-                    val senderName = jwtUtil.getUsernameFromToken(principal!!.payload)
+                    val senderName = principal!!.payload.getClaim("username").asString()
 
                     val request = call.receive<Map<String, String>>()
                     val targetUserId = request["userId"] ?: throw Exception("缺少目标用户ID")
