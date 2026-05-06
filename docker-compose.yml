@@ -1,0 +1,138 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: med-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root123456}
+      DB_USER: ${DB_USER:-Hyy}
+      DB_PASSWORD: ${DB_PASSWORD:-hyy20060420}
+    ports:
+      - "${MYSQL_PORT:-4000}:4000"
+    command: --port=4000
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - med-network
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.auth
+    container_name: med-auth
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: "8081"
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_DATABASE_URL: "jdbc:mysql://mysql:4000/med_auth?useInformationSchema=false"
+      AUTH_DATABASE_USER: "Hyy"
+      AUTH_DATABASE_PASSWORD: "hyy20060420"
+    networks:
+      - med-network
+
+  patient-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.patient
+    container_name: med-patient
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: "8082"
+      JWT_SECRET: ${JWT_SECRET}
+      PATIENT_DATABASE_URL: "jdbc:mysql://mysql:4000/patient?useInformationSchema=false"
+      PATIENT_DATABASE_USER: "Hyy"
+      PATIENT_DATABASE_PASSWORD: "hyy20060420"
+    networks:
+      - med-network
+
+  metric-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.metric
+    container_name: med-metric
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PORT: "8083"
+      JWT_SECRET: ${JWT_SECRET}
+      METRIC_DATABASE_URL: "jdbc:mysql://mysql:4000/analysis?useInformationSchema=false"
+      METRIC_DATABASE_USER: "Hyy"
+      METRIC_DATABASE_PASSWORD: "hyy20060420"
+      METRIC_SEGMENTATION_SERVICE_ENABLED: "${METRIC_SEGMENTATION_ENABLED:-true}"
+      METRIC_SEGMENTATION_SERVICE_URL: "http://segmentation-service:8099"
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    networks:
+      - med-network
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gateway
+    container_name: med-gateway
+    restart: unless-stopped
+    depends_on:
+      - auth-service
+      - patient-service
+      - metric-service
+    environment:
+      PORT: "8088"
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_SERVICE_URL: "http://auth-service:8081"
+      PATIENT_SERVICE_URL: "http://patient-service:8082"
+      METRIC_SERVICE_URL: "http://metric-service:8083"
+      REPORT_SERVICE_URL: "http://metric-service:8083"
+    networks:
+      - med-network
+
+  segmentation-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.segmentation
+    container_name: med-segmentation
+    restart: unless-stopped
+    environment:
+      SEGMENTATION_SERVICE_ENVIRONMENT: "docker"
+      SEGMENTATION_SERVICE_HOST: "0.0.0.0"
+      SEGMENTATION_SERVICE_PORT: "8099"
+      SEGMENTATION_SERVICE_INFERENCE_BACKEND: "${SEGMENTATION_BACKEND:-mock}"
+    networks:
+      - med-network
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nginx
+    container_name: med-nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    depends_on:
+      - api-gateway
+      - auth-service
+      - patient-service
+      - metric-service
+      - segmentation-service
+    networks:
+      - med-network
+
+volumes:
+  mysql-data:
+
+networks:
+  med-network:
+    driver: bridge
