@@ -1372,7 +1372,7 @@ function LoginPage({ redirectTo }) {
                   required
                 >
                   <option value="doctor">医生</option>
-                  <option value="nurse">护士</option>
+
                   <option value="receptionist">前台/挂号</option>
                 </select>
               </label>
@@ -1588,7 +1588,6 @@ function RegisterPage() {
             <select value={formData.role} onChange={(event) => setFormData((current) => ({ ...current, role: event.target.value }))}>
               <option value="admin">管理员</option>
               <option value="doctor">医生</option>
-              <option value="nurse">护士</option>
               <option value="receptionist">前台</option>
             </select>
           </label>
@@ -2635,7 +2634,6 @@ function UserManagePage() {
           <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
             <option value="">全部角色</option>
             <option value="doctor">医生</option>
-            <option value="nurse">护士</option>
             <option value="receptionist">前台</option>
             <option value="admin">管理员</option>
           </select>
@@ -2738,9 +2736,9 @@ function UserManagePage() {
               value={userForm.deptCode}
               disabled={modal.type === 'edit'}
               onChange={(event) => setUserForm((current) => ({ ...current, deptCode: event.target.value }))}
-              required
+              required={userForm.role !== 'receptionist'}
             >
-              <option value="">请选择科室</option>
+              <option value="">{userForm.role === 'receptionist' ? '无需选择（可选）' : '请选择科室'}</option>
               {departments.map((department) => (
                 <option key={department.id} value={department.id}>
                   {department.name}
@@ -2756,7 +2754,6 @@ function UserManagePage() {
             <span>角色</span>
             <select value={userForm.role} onChange={(event) => setUserForm((current) => ({ ...current, role: event.target.value }))}>
               <option value="doctor">医生</option>
-              <option value="nurse">护士</option>
               <option value="receptionist">前台</option>
               <option value="admin">管理员</option>
             </select>

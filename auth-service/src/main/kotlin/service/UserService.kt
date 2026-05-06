@@ -65,24 +65,34 @@ class UserService(
                 message = "注册成功"
             )
         } else {
-            // 普通用户注册（doctor/nurse/receptionist）
+            // 普通用户注册（doctor/receptionist）
             val hospitalId = user.hospitalId?.trim()?.takeIf { it.isNotEmpty() }
                 ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
-            val deptCode = user.deptCode?.trim()?.takeIf { it.isNotEmpty() }
-                ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
+            val deptCode = user.deptCode?.trim()?.takeIf { it.isNotEmpty() } // receptionist 可为 null
 
-            if (!userRepository.existsByHospitalAndDept(hospitalId, deptCode)) {
-                throw AuthException.HospitalOrDepartmentIdInvalidException()
+            // 只有 doctor 才必须选择科室
+            if (normalizedRole == "doctor") {
+                if (deptCode == null) {
+                    throw AuthException.HospitalOrDepartmentIdInvalidException()
+                }
+                if (!userRepository.existsByHospitalAndDept(hospitalId, deptCode)) {
+                    throw AuthException.HospitalOrDepartmentIdInvalidException()
+                }
+            } else if (deptCode != null) {
+                // receptionist 选了科室也要验证
+                if (!userRepository.existsByHospitalAndDept(hospitalId, deptCode)) {
+                    throw AuthException.HospitalOrDepartmentIdInvalidException()
+                }
             }
 
             // 生成带角色前缀的用户名
             val rolePrefix = when (normalizedRole) {
                 "doctor" -> "DR"
-                "nurse" -> "NR"
                 "receptionist" -> "RC"
                 else -> "USR"
             }
-            val userUsername = "$rolePrefix-$hospitalId-$deptCode-$tempUserId"
+            val deptSuffix = if (deptCode != null) "-$deptCode" else ""
+            val userUsername = "$rolePrefix-$hospitalId$deptSuffix-$tempUserId"
 
             val userCreate = UserDto.UserCreate(
                 hospitalId = hospitalId,
