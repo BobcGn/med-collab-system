@@ -136,21 +136,29 @@ class UserRepository(
                 }
             }
 
-            if (parts.size != 4) {
+            val entity = if (parts.size == 4) {
+                val (_, hospitalId, deptCode, userSeq) = parts
+                transaction {
+                    UserEntity.find {
+                        (Users.hospitalId eq hospitalId) and
+                                (Users.deptCode eq deptCode) and
+                                (Users.userSeq eq userSeq)
+                    }.firstOrNull()
+                }
+            } else if (parts.size == 3) {
+                val (_, hospitalId, userSeq) = parts
+                transaction {
+                    UserEntity.find {
+                        (Users.hospitalId eq hospitalId) and
+                                (Users.deptCode.isNull()) and
+                                (Users.userSeq eq userSeq)
+                    }.firstOrNull()
+                }
+            } else {
                 return null
             }
 
-            val (_, hospitalId, deptCode, userSeq) = parts
-
-            return transaction {
-                UserEntity.find {
-                    (Users.hospitalId eq hospitalId) and
-                            (Users.deptCode eq deptCode) and
-                            (Users.userSeq eq userSeq)
-                }.firstOrNull()?.let { entity ->
-                    buildUserInfo(entity)
-                }
-            }
+            return entity?.let { buildUserInfo(it) }
         } catch (e: Exception) {
             throw Exception("查找用户失败: ${e.message}")
         }
@@ -180,6 +188,14 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode eq deptCode) and
+                        (Users.userSeq eq userSeq)
+                    }.firstOrNull()
+                } else if (parts.size == 3) {
+                    // 无科室用户: {rolePrefix}-{hospitalId}-{userSeq}
+                    val (_, hospitalId, userSeq) = parts
+                    UserEntity.find {
+                        (Users.hospitalId eq hospitalId) and
+                        (Users.deptCode.isNull()) and
                         (Users.userSeq eq userSeq)
                     }.firstOrNull()
                 } else {
@@ -330,6 +346,13 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode eq deptCode) and
+                        (Users.userSeq eq userSeq)
+                    }
+                } else if (parts.size == 3) {
+                    val (_, hospitalId, userSeq) = parts
+                    UserEntity.find {
+                        (Users.hospitalId eq hospitalId) and
+                        (Users.deptCode.isNull()) and
                         (Users.userSeq eq userSeq)
                     }
                 } else {

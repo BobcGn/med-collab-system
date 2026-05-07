@@ -26,6 +26,7 @@ const RouterContext = createContext(null)
 
 const LOCATION_EVENT = 'medical-collab-popstate'
 
+const BASE_PATH = '/medcollab'
 const ADMIN_ROLE = 'admin'
 const PUBLIC_PATHS = new Set(['/login', '/register'])
 
@@ -74,11 +75,15 @@ function normalizePath(pathname) {
     return '/'
   }
 
-  const trimmed = pathname.endsWith('/') && pathname.length > 1
+  let normalized = pathname.endsWith('/') && pathname.length > 1
     ? pathname.slice(0, -1)
     : pathname
 
-  return trimmed || '/'
+  if (normalized.startsWith(BASE_PATH)) {
+    normalized = normalized.slice(BASE_PATH.length) || '/'
+  }
+
+  return normalized || '/'
 }
 
 function getLocationSnapshot() {
@@ -122,7 +127,12 @@ function RouterProvider({ children }) {
 
   const navigate = (to, options = {}) => {
     const nextUrl = new URL(to, window.location.origin)
-    const nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
+    let nextPath = `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
+
+    if (!to.includes('://') && !nextUrl.pathname.startsWith(BASE_PATH)) {
+      nextPath = `${BASE_PATH}${nextUrl.pathname === '/' ? '' : nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`
+    }
+
     const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
 
     if (nextPath === currentPath) {

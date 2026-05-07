@@ -68,7 +68,7 @@ class UserService(
             // 普通用户注册（doctor/receptionist）
             val hospitalId = user.hospitalId?.trim()?.takeIf { it.isNotEmpty() }
                 ?: throw AuthException.HospitalOrDepartmentIdInvalidException()
-            val deptCode = user.deptCode?.trim()?.takeIf { it.isNotEmpty() } // receptionist 可为 null
+            val deptCode = user.deptCode?.trim()?.takeIf { it.isNotEmpty() && it.lowercase() != "null" } // receptionist 可为 null
 
             // 只有 doctor 才必须选择科室
             if (normalizedRole == "doctor") {

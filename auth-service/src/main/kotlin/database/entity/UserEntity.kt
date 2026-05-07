@@ -34,7 +34,8 @@ class UserEntity(id: EntityID<String>) : Entity<String>(id) {
                 "receptionist" -> "RC"
                 else -> "USR"
             }
-            return "$prefix-$hospitalId-$deptCode-$userSeq"
+            val deptPart = if (deptCode != null) "-$deptCode" else ""
+            return "$prefix-$hospitalId$deptPart-$userSeq"
         }
 
     fun UserEntity.toUserInfo() = UserDto.UserInfo(
