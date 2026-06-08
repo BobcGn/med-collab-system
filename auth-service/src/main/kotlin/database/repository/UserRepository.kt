@@ -33,7 +33,7 @@ class UserRepository(
                 userId  // 返回生成的 UUID
             }
         } catch (e: Exception) {
-            throw Exception("创建用户失败: ${e.message}")
+            throw Exception("创建用户失败: ${e.message}", e)
         }
     }
 
@@ -47,6 +47,9 @@ class UserRepository(
         return try {
             transaction {
                 UserEntity.findById(id)?.let { entity ->
+                    // 过滤已删除用户
+                    if (entity.isDeleted) return@let null
+
                     // 获取医院名称
                     val hospitalName = if (entity.hospitalId != null) {
                         HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
@@ -81,8 +84,8 @@ class UserRepository(
                     )
                 }
             }
-        }catch (e: Exception){
-            throw Exception("查找用户失败")
+        } catch (e: Exception) {
+            throw Exception("查找用户失败", e)
         }
     }
 
@@ -95,6 +98,9 @@ class UserRepository(
         return try {
             transaction {
                 UserEntity.findById(id)?.let { entity ->
+                    // 过滤已删除用户
+                    if (entity.isDeleted) return@let null
+
                     UserDto.UserInfoWithCredentials(
                         id = entity.id.value,
                         hospitalId = entity.hospitalId,
@@ -111,8 +117,8 @@ class UserRepository(
                     )
                 }
             }
-        }catch (e: Exception){
-            throw Exception("查找用户失败")
+        } catch (e: Exception) {
+            throw Exception("查找用户失败", e)
         }
     }
 
@@ -131,7 +137,8 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId.isNull()) and
                         (Users.deptCode.isNull()) and
-                        (Users.userSeq eq userSeq)
+                        (Users.userSeq eq userSeq) and
+                        (Users.isDeleted eq false)
                     }.firstOrNull()?.let { entity -> buildUserInfo(entity) }
                 }
             }
@@ -142,7 +149,8 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                                 (Users.deptCode eq deptCode) and
-                                (Users.userSeq eq userSeq)
+                                (Users.userSeq eq userSeq) and
+                                (Users.isDeleted eq false)
                     }.firstOrNull()
                 }
             } else if (parts.size == 3) {
@@ -151,7 +159,8 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                                 (Users.deptCode.isNull()) and
-                                (Users.userSeq eq userSeq)
+                                (Users.userSeq eq userSeq) and
+                                (Users.isDeleted eq false)
                     }.firstOrNull()
                 }
             } else {
@@ -160,7 +169,7 @@ class UserRepository(
 
             return entity?.let { buildUserInfo(it) }
         } catch (e: Exception) {
-            throw Exception("查找用户失败: ${e.message}")
+            throw Exception("查找用户失败: ${e.message}", e)
         }
     }
 
@@ -180,7 +189,8 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId.isNull()) and
                         (Users.deptCode.isNull()) and
-                        (Users.userSeq eq userSeq)
+                        (Users.userSeq eq userSeq) and
+                        (Users.isDeleted eq false)
                     }.firstOrNull()
                 } else if (parts.size == 4) {
                     // 普通用户账号格式: {rolePrefix}-{hospitalId}-{deptCode}-{userSeq}
@@ -188,7 +198,8 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode eq deptCode) and
-                        (Users.userSeq eq userSeq)
+                        (Users.userSeq eq userSeq) and
+                        (Users.isDeleted eq false)
                     }.firstOrNull()
                 } else if (parts.size == 3) {
                     // 无科室用户: {rolePrefix}-{hospitalId}-{userSeq}
@@ -196,7 +207,8 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode.isNull()) and
-                        (Users.userSeq eq userSeq)
+                        (Users.userSeq eq userSeq) and
+                        (Users.isDeleted eq false)
                     }.firstOrNull()
                 } else {
                     return@transaction null
@@ -238,8 +250,8 @@ class UserRepository(
                     )
                 }
             }
-        }catch (e: Exception){
-            throw Exception("查找用户失败")
+        } catch (e: Exception) {
+            throw Exception("查找用户失败", e)
         }
     }
 
@@ -260,8 +272,8 @@ class UserRepository(
                     true
                 }?: false
             }
-        }catch (e: Exception){
-            throw Exception("更新用户失败")
+        } catch (e: Exception) {
+            throw Exception("更新用户失败", e)
         }
     }
 
@@ -276,8 +288,8 @@ class UserRepository(
                     true
                 }?: false
             }
-        }catch (e: Exception){
-            throw Exception("删除用户失败")
+        } catch (e: Exception) {
+            throw Exception("删除用户失败: ${e.message}", e)
         }
     }
 
@@ -291,7 +303,7 @@ class UserRepository(
         return try {
             transaction {
                 UserEntity.find{
-                    (Users.hospitalId eq hospitalId) and (Users.deptCode eq deptCode)
+                    (Users.hospitalId eq hospitalId) and (Users.deptCode eq deptCode) and (Users.isDeleted eq false)
                 }.map{ entity ->
                     // 获取医院名称
                     val hospitalName = HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
@@ -319,8 +331,8 @@ class UserRepository(
                     )
                 }
             }
-        }catch (e: Exception){
-            throw Exception("查找用户失败")
+        } catch (e: Exception) {
+            throw Exception("查找用户失败", e)
         }
     }
 
@@ -339,21 +351,24 @@ class UserRepository(
                     UserEntity.find {
                         (Users.hospitalId.isNull()) and
                         (Users.deptCode.isNull()) and
-                        (Users.userSeq eq userSeq)
+                        (Users.userSeq eq userSeq) and
+                        (Users.isDeleted eq false)
                     }
                 } else if (parts.size == 4) {
                     val (_, hospitalId, deptCode, userSeq) = parts
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode eq deptCode) and
-                        (Users.userSeq eq userSeq)
+                        (Users.userSeq eq userSeq) and
+                        (Users.isDeleted eq false)
                     }
                 } else if (parts.size == 3) {
                     val (_, hospitalId, userSeq) = parts
                     UserEntity.find {
                         (Users.hospitalId eq hospitalId) and
                         (Users.deptCode.isNull()) and
-                        (Users.userSeq eq userSeq)
+                        (Users.userSeq eq userSeq) and
+                        (Users.isDeleted eq false)
                     }
                 } else {
                     return@transaction false
@@ -361,8 +376,8 @@ class UserRepository(
 
                 !result.empty()
             }
-        }catch (e: Exception){
-            throw Exception("检查用户失败")
+        } catch (e: Exception) {
+            throw Exception("检查用户失败", e)
         }
     }
 
@@ -383,7 +398,7 @@ class UserRepository(
             // 检查科室是否存在且激活
             departmentRepository.existsActiveByHospitalAndId(hospitalId, deptCode)
         } catch (e: Exception) {
-            throw Exception("检查医院和科室失败: ${e.message}")
+            throw Exception("检查医院和科室失败: ${e.message}", e)
         }
     }
 
@@ -396,7 +411,7 @@ class UserRepository(
         return try {
             hospitalRepository.existsActiveById(hospitalId)
         } catch (e: Exception) {
-            throw Exception("检查医院失败: ${e.message}")
+            throw Exception("检查医院失败: ${e.message}", e)
         }
     }
 
@@ -416,9 +431,9 @@ class UserRepository(
         return try {
             transaction {
                 val query = if (role != null) {
-                    UserEntity.find { Users.role eq role }
+                    UserEntity.find { (Users.role eq role) and (Users.isDeleted eq false) }
                 } else {
-                    UserEntity.all()
+                    UserEntity.find { Users.isDeleted eq false }
                 }
 
                 query
@@ -460,7 +475,7 @@ class UserRepository(
                     }
             }
         } catch (e: Exception) {
-            throw Exception("分页查询用户失败")
+            throw Exception("分页查询用户失败", e)
         }
     }
 
@@ -473,12 +488,11 @@ class UserRepository(
         return try {
             transaction {
                 UserEntity.find {
-                    // 搜索 fullName 和 username 的组成部分
-                    // 注意：hospitalId 和 deptCode 可能为 null，需要使用 coalesce 或单独处理
-                    (Users.fullName like "%$keyword%") or
+                    ((Users.fullName like "%$keyword%") or
                     (Users.hospitalId like "%$keyword%") or
                     (Users.deptCode like "%$keyword%") or
-                    (Users.userSeq like "%$keyword%")
+                    (Users.userSeq like "%$keyword%")) and
+                    (Users.isDeleted eq false)
                 }
                 .map { entity ->
                     // 获取医院名称
@@ -516,7 +530,7 @@ class UserRepository(
                 }
             }
         } catch (e: Exception) {
-            throw Exception("搜索用户失败")
+            throw Exception("搜索用户失败", e)
         }
     }
 
@@ -528,7 +542,9 @@ class UserRepository(
     suspend fun findUsersByHospitalId(hospitalId: String): List<UserDto.UserInfo> {
         return try {
             transaction {
-                UserEntity.find { Users.hospitalId eq hospitalId }
+                UserEntity.find {
+                    (Users.hospitalId eq hospitalId) and (Users.isDeleted eq false)
+                }
                 .map { entity ->
                     // 获取医院名称
                     val hospitalName = HospitalEntity.findById(entity.hospitalId!!)?.name ?: entity.hospitalId
@@ -561,7 +577,7 @@ class UserRepository(
                 }
             }
         } catch (e: Exception) {
-            throw Exception("根据医院ID查询用户失败")
+            throw Exception("根据医院ID查询用户失败", e)
         }
     }
 
@@ -574,9 +590,9 @@ class UserRepository(
         return try {
             transaction {
                 val query = if (hospitalId != null) {
-                    UserEntity.find { Users.hospitalId eq hospitalId }
+                    UserEntity.find { (Users.hospitalId eq hospitalId) and (Users.isDeleted eq false) }
                 } else {
-                    UserEntity.all()
+                    UserEntity.find { Users.isDeleted eq false }
                 }
 
                 val total = query.count().toInt()
@@ -590,7 +606,7 @@ class UserRepository(
                 )
             }
         } catch (e: Exception) {
-            throw Exception("获取用户统计信息失败")
+            throw Exception("获取用户统计信息失败", e)
         }
     }
 

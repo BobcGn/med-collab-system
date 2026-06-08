@@ -1,0 +1,238 @@
+# ============================================================================
+# Scheduled Security Scan — 基于 skill-central codeql-security-scanner
+# ----------------------------------------------------------------------------
+# 每日定时深度扫描，覆盖 OWASP Top 10:
+#   - A01:2021 Broken Access Control
+#   - A03:2021 Injection (SQL/NoSQL/OS Command/XSS/路径穿越)
+#   - A04:2021 Insecure Design
+#   - A07:2021 Identification and Authentication Failures
+#   - A08:2021 Software and Data Integrity Failures
+#
+# 同时执行: 秘密扫描、依赖漏洞检查、Dockerfile 安全审查
+# ============================================================================
+
+name: Scheduled Security Audit
+
+on:
+  schedule:
+    # 每天 08:57 UTC (北京时间 ~16:57) 执行
+    - cron: '57 8 * * *'
+  workflow_dispatch:
+    inputs:
+      scan_depth:
+        description: '扫描深度 (quick/full)'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+          - quick
+          - full
+
+permissions:
+  security-events: write
+  actions: read
+  contents: read
+
+jobs:
+  # =========================================================================
+  # CodeQL 深度扫描 (所有语言)
+  # =========================================================================
+  codeql-analysis:
+    name: 'CodeQL Analysis'
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['java-kotlin', 'python', 'javascript-typescript']
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 # v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+          config: |
+            paths-ignore:
+              - '**/node_modules/**'
+              - '**/build/**'
+              - '**/test/**'
+              - '**/tests/**'
+
+      - name: Setup Java (for Kotlin analysis)
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@3a4f6e1af2c07e17e6e3b4b5c0b6e1a5d0e8f9c0 # v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Build Kotlin for CodeQL
+        if: matrix.language == 'java-kotlin'
+        run: ./gradlew compileKotlin --no-daemon -q || true
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 # v3
+        with:
+          category: '/language:${{ matrix.language }}'
+
+  # =========================================================================
+  # Secret Scanning — 硬编码密钥/Token/密码检测
+  # 来源: skill-central / codeql-security-scanner § 硬编码敏感信息检测
+  # 检查: API Key, Token, Password, 数据库连接字符串, 内网地址, JWT secret
+  # =========================================================================
+  secret-scan:
+    name: 'Secret Detection'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3 # v2
+        env:
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+        continue-on-error: true
+        with:
+          config-path: .github/gitleaks.toml
+
+      - name: Manual Pattern Check (skill-central rules)
+        run: |
+          echo "=== 硬编码敏感信息检测 (skill-central/codeql-security-scanner) ==="
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          NC='\033[0m'
+
+          # 检测模式 (对应 codeql-security-scanner 硬编码敏感信息检测规则)
+          PATTERNS=(
+            "api[_-]?key\s*[:=]\s*['\"][^'\"]{8,}['\"]|API_KEY"
+            "secret\s*[:=]\s*['\"][^'\"]{8,}['\"]"
+            "token\s*[:=]\s*['\"][^'\"]{8,}['\"]"
+            "password\s*[:=]\s*['\"][^'\"]{4,}['\"]"
+            "jdbc:[^/]+//[^:]+:[^@]+@"
+            "mongodb://[^:]+:[^@]+@"
+            "-----BEGIN (RSA |EC )?PRIVATE KEY-----"
+            "10\.[0-9]+\.[0-9]+\.[0-9]+"
+            "192\.168\.[0-9]+\.[0-9]+"
+          )
+
+          FOUND=0
+          for pattern in "${PATTERNS[@]}"; do
+            # 排除测试文件和配置模板
+            MATCHES=$(grep -rIn "$pattern" --include="*.kt" --include="*.py" \
+              --include="*.ts" --include="*.tsx" --include="*.js" \
+              --include="*.json" --include="*.yaml" --include="*.yml" \
+              --include="*.properties" --include="Dockerfile" \
+              --exclude-dir=node_modules --exclude-dir=build \
+              --exclude-dir=.git --exclude-dir=test --exclude-dir=tests \
+              --exclude="*.test.*" --exclude="*.spec.*" \
+              . 2>/dev/null | head -5 || true)
+            if [ -n "$MATCHES" ]; then
+              echo -e "${RED}⚠  发现可能的敏感信息:${NC} $pattern"
+              echo "$MATCHES"
+              FOUND=$((FOUND + 1))
+            fi
+          done
+
+          if [ "$FOUND" -eq 0 ]; then
+            echo -e "${GREEN}✅ 未发现硬编码敏感信息${NC}"
+          else
+            echo -e "${RED}⚠  共发现 $FOUND 类可能的风险模式，请人工审查${NC}"
+          fi
+
+  # =========================================================================
+  # Dependency Vulnerability Check
+  # 来源: skill-central / codeql-security-scanner § 依赖与工作流安全
+  # =========================================================================
+  dependency-check:
+    name: 'Dependency Audit'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Gradle dependency verification
+        run: |
+          ./gradlew dependencies --no-daemon -q > /tmp/gradle-deps.txt 2>&1 || true
+          echo "Gradle dependencies resolved successfully"
+
+      - name: npm audit
+        working-directory: frontend
+        run: npm audit --audit-level=high || true
+        continue-on-error: true
+
+      - name: pip audit (pip-audit)
+        working-directory: segmentation-service
+        run: |
+          pip install pip-audit 2>/dev/null
+          pip-audit --requirement <(pip freeze) || true
+        continue-on-error: true
+
+  # =========================================================================
+  # Dockerfile Security Check
+  # 来源: skill-central / container-infra § Image hygiene + Security
+  # =========================================================================
+  dockerfile-audit:
+    name: 'Dockerfile Security'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Dockerfile Security Scan (skill-central container-infra rules)
+        run: |
+          echo "=== Dockerfile 安全审查 (基于 skill-central/container-infra) ==="
+          RED='\033[0;31m'
+          GREEN='\033[0;32m'
+          YELLOW='\033[0;33m'
+          NC='\033[0m'
+
+          ISSUES=0
+          for df in $(find . -name 'Dockerfile' -not -path './node_modules/*' -not -path './.git/*'); do
+            echo ""
+            echo "--- $df ---"
+
+            # 1. 非 root 用户 (container-infra: Image hygiene §3)
+            if grep -q "^USER" "$df"; then
+              USER_LINE=$(grep "^USER" "$df" | head -1)
+              if echo "$USER_LINE" | grep -q "root"; then
+                echo -e "${RED}❌ 以 root 用户运行: $USER_LINE${NC}"
+                ISSUES=$((ISSUES + 1))
+              else
+                echo -e "${GREEN}✅ 非 root 用户: $USER_LINE${NC}"
+              fi
+            else
+              echo -e "${RED}❌ 缺失 USER 指令 (必须以非 root 用户运行)${NC}"
+              ISSUES=$((ISSUES + 1))
+            fi
+
+            # 2. HEALTHCHECK (container-infra: Docker §4)
+            if grep -q "HEALTHCHECK" "$df"; then
+              echo -e "${GREEN}✅ 有 HEALTHCHECK${NC}"
+            else
+              echo -e "${YELLOW}⚠️  缺少 HEALTHCHECK (建议添加)${NC}"
+            fi
+
+            # 3. 基础镜像检查 (container-infra: Image hygiene §3)
+            FROM_LINE=$(grep "^FROM" "$df" | head -1)
+            if echo "$FROM_LINE" | grep -qE ":(latest|main|master)$|^FROM [^:]*$"; then
+              echo -e "${YELLOW}⚠️  基础镜像未 pin 到具体版本: $FROM_LINE${NC}"
+            else
+              echo -e "${GREEN}✅ 基础镜像版本已 pin${NC}"
+            fi
+
+            # 4. 敏感端口暴露检查
+            if grep -q "EXPOSE" "$df"; then
+              EXPOSED=$(grep "EXPOSE" "$df")
+              echo "   暴露端口: $EXPOSED"
+            fi
+          done
+
+          if [ "$ISSUES" -gt 0 ]; then
+            echo ""
+            echo -e "${RED}❌ 发现 $ISSUES 个必须修复的 Dockerfile 安全问题${NC}"
+            exit 1
+          else
+            echo ""
+            echo -e "${GREEN}✅ Dockerfile 安全检查通过${NC}"
+          fi

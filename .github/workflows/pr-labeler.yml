@@ -1,0 +1,22 @@
+# ============================================================================
+# PR Auto Labeler — 基于 skill-central pr-review-checklist 自动分类
+# ============================================================================
+name: PR Labeler
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    name: '🏷️ Auto Label PR'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 # v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          sync-labels: true

@@ -1,0 +1,93 @@
+# ============================================================================
+# PR Labeler — 基于 skill-central pr-review-checklist 变更分类
+# 自动为 PR 打标签，便于审查者聚焦相关维度
+# ============================================================================
+
+# 后端 Kotlin 服务
+'auth-service':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'auth-service/**'
+
+'patient-service':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'patient-service/**'
+
+'metric-service':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'metric-service/**'
+
+'api-gateway':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'api-gateway/**'
+
+# 共享模块 — 变更时需要特别关注 (api-design-review)
+'shared-dto':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'shared/**'
+
+# Python 服务
+'segmentation-service':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'segmentation-service/**'
+
+# 前端
+'frontend':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'frontend/**'
+
+# 基础设施
+'docker':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docker/**'
+          - '**/Dockerfile'
+          - '**/docker-compose*.yml'
+
+'ci-cd':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+          - '.ai/mcp/**'
+
+'gradle':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.gradle.kts'
+          - 'gradle/**'
+          - 'gradlew'
+          - 'gradlew.bat'
+
+# 审查维度标签 (对应 skill-central pr-review-checklist 维度)
+'security':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/security/**'
+          - '**/auth/**'
+          - '**/jwt/**'
+          - '**/encryption/**'
+  - head-branch: ['security-*', 'fix/security-*', 'fix/vuln-*']
+
+'breaking-change':
+  - head-branch: ['breaking-*', 'major-*']
+
+'documentation':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - '**.md'
+          - 'README.md'
+
+'tests':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/test/**'
+          - '**/tests/**'
+          - '**/*.test.*'
+          - '**/*.spec.*'

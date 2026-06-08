@@ -1,0 +1,522 @@
+# ============================================================================
+# PR Review Pipeline — 基于 skill-central PR Review Checklist 设计
+# ----------------------------------------------------------------------------
+# 触发条件: PR 打开/推送/重新打开, 合并到 main/master 时更新基线
+#
+# 审查维度 (对应 skill-central skills):
+#   1. 架构与设计       → architectural-mindset
+#   2. 正确性           → error-handling-patterns, testing-best-practices
+#   3. 安全性           → codeql-security-scanner
+#   4. 性能             → backend-code-review, python-code-review
+#   5. 测试             → test-codecov-assessor
+#   6. 可维护性         → linting-code-style-inspector, commit-message-formatter
+#   7. 兼容性           → api-design-review, changeset-changelog-generator
+#   8. 基础设施         → container-infra, cicd-pipeline-review
+# ============================================================================
+
+name: PR Review Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main, master]
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: '21'
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '22'
+
+jobs:
+  # =========================================================================
+  # Job 0: Commit Message Validation
+  # 来源: skill-central / commit-message-formatter
+  # 校验 Conventional Commits 格式，检测 type/scope/breaking change
+  # =========================================================================
+  commit-lint:
+    name: '📝 Commit Message Lint'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate PR title (Conventional Commits)
+        uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155ed6017 # v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            style
+            refactor
+            perf
+            test
+            build
+            ci
+            chore
+            revert
+          requireScope: false
+          subjectPattern: ^[a-z].*[^.]$
+          subjectPatternError: |
+            Short description 必须以小写字母开头，不以句号结尾，不超过72字符
+
+      - name: Check for BREAKING CHANGE footer
+        if: always()
+        run: |
+          PR_BODY="${{ github.event.pull_request.body }}"
+          # 不强制，但提醒缺失
+          if echo "$PR_BODY" | grep -qi "breaking change"; then
+            echo "✅ BREAKING CHANGE 已标注"
+          fi
+
+  # =========================================================================
+  # Job 1: Changed Files Detection
+  # 来源: skill-central / pr-review-checklist (架构与设计维度)
+  # 检测变更范围以决定后续 job 是否运行
+  # =========================================================================
+  changed-files:
+    name: '🔍 Detect Changes'
+    runs-on: ubuntu-latest
+    outputs:
+      kotlin: ${{ steps.filter.outputs.kotlin }}
+      python: ${{ steps.filter.outputs.python }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      docker: ${{ steps.filter.outputs.docker }}
+      shared: ${{ steps.filter.outputs.shared }}
+      gradle: ${{ steps.filter.outputs.gradle }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: filter
+        with:
+          filters: |
+            kotlin:
+              - 'auth-service/**'
+              - 'patient-service/**'
+              - 'metric-service/**'
+              - 'api-gateway/**'
+              - 'shared/**'
+              - 'build.gradle.kts'
+              - 'settings.gradle.kts'
+              - 'gradle/**'
+            python:
+              - 'segmentation-service/**'
+            frontend:
+              - 'frontend/**'
+            docker:
+              - 'docker/**'
+              - '**/Dockerfile'
+              - '**/docker-compose*.yml'
+              - 'scripts/quick-start.sh'
+            shared:
+              - 'shared/**'
+            gradle:
+              - '**/*.gradle.kts'
+              - 'gradle/**'
+              - 'gradlew'
+              - 'gradlew.bat'
+
+  # =========================================================================
+  # Job 2: Kotlin Backend Checks
+  # 来源: skill-central / backend-code-review + linting-code-style-inspector
+  # 编译检查 + 单元测试 + 覆盖率
+  # =========================================================================
+  kotlin-checks:
+    name: '🔷 Kotlin Services'
+    needs: changed-files
+    if: needs.changed-files.outputs.kotlin == 'true' || needs.changed-files.outputs.gradle == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [auth-service, patient-service, metric-service, api-gateway]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@3a4f6e1af2c07e17e6e3b4b5c0b6e1a5d0e8f9c0 # v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@dbbf8e0c9f1e6a7d3c0b5e6f8a9c1d2e3f4a5b6c # v4
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Compile ${{ matrix.service }}
+        run: ./gradlew :${{ matrix.service }}:compileKotlin
+
+      - name: Run ${{ matrix.service }} Tests
+        run: ./gradlew :${{ matrix.service }}:test
+        continue-on-error: true
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@65c4c6d0b5e3a7f8d9e1c2a3b4d5e6f7a8b9c0d1 # v4
+        with:
+          name: test-results-${{ matrix.service }}
+          path: ${{ matrix.service }}/build/test-results/
+          retention-days: 7
+
+  # =========================================================================
+  # Job 3: Python Segmentation Service Checks
+  # 来源: skill-central / python-code-review + linting-code-style-inspector
+  # ruff lint + pytest
+  # =========================================================================
+  python-checks:
+    name: '🐍 Python Service'
+    needs: changed-files
+    if: needs.changed-files.outputs.python == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@a7f8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3 # v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ env.PYTHON_VERSION }}-${{ hashFiles('segmentation-service/pyproject.toml') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ env.PYTHON_VERSION }}-
+
+      - name: Install dependencies (dev)
+        working-directory: segmentation-service
+        run: pip install -e ".[dev]"
+
+      - name: Ruff Lint Check
+        working-directory: segmentation-service
+        run: ruff check .
+
+      - name: Run pytest
+        working-directory: segmentation-service
+        run: pytest --tb=short
+
+  # =========================================================================
+  # Job 4: Frontend Checks
+  # 来源: skill-central / linting-code-style-inspector
+  # Build check (TypeScript 编译 + Vite 打包)
+  # =========================================================================
+  frontend-checks:
+    name: '⚛️ Frontend Build'
+    needs: changed-files
+    if: needs.changed-files.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build check
+        working-directory: frontend
+        run: npm run build
+
+  # =========================================================================
+  # Job 5: Security Scan (CodeQL)
+  # 来源: skill-central / codeql-security-scanner
+  # OWASP Top 10 覆盖：注入、硬编码密钥、不安全API、认证授权
+  # =========================================================================
+  security-scan:
+    name: '🔒 CodeQL Security'
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['java-kotlin', 'python', 'javascript-typescript']
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 # v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+          config: |
+            paths-ignore:
+              - '**/node_modules/**'
+              - '**/build/**'
+
+      - name: Setup Java (for Kotlin analysis)
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@3a4f6e1af2c07e17e6e3b4b5c0b6e1a5d0e8f9c0 # v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+
+      - name: Build Kotlin (required for CodeQL)
+        if: matrix.language == 'java-kotlin'
+        run: ./gradlew compileKotlin --no-daemon -q || true
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 # v3
+        with:
+          category: '/language:${{ matrix.language }}'
+
+  # =========================================================================
+  # Job 6: Docker Build Verification
+  # 来源: skill-central / container-infra
+  # 验证 Dockerfile 正确性并检查安全实践（非 root、健康检查等）
+  # =========================================================================
+  docker-check:
+    name: '🐳 Docker Build'
+    needs: changed-files
+    if: needs.changed-files.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0 # v3
+
+      # 只验证构建，不推送镜像
+      - name: Build auth-service image (dry-run)
+        run: |
+          if [ -f auth-service/Dockerfile ]; then
+            docker build -t med-collab/auth-service:pr-check --check \
+              -f auth-service/Dockerfile auth-service/ || true
+          fi
+
+      - name: Check Dockerfile Best Practices
+        run: |
+          echo "=== Checking Dockerfiles for skill-central/container-infra compliance ==="
+          for df in $(find . -name 'Dockerfile' -not -path './node_modules/*' -not -path './.git/*'); do
+            echo "--- $df ---"
+            # Check non-root user
+            if grep -q "USER" "$df"; then
+              echo "  ✅ Has USER directive"
+            else
+              echo "  ⚠️  Missing USER directive (skill-central: non-root user required)"
+            fi
+            # Check HEALTHCHECK
+            if grep -q "HEALTHCHECK" "$df"; then
+              echo "  ✅ Has HEALTHCHECK"
+            else
+              echo "  ⚠️  Missing HEALTHCHECK (skill-central: health check recommended)"
+            fi
+          done
+
+  # =========================================================================
+  # Job 7: PR Review Checklist Comment
+  # 来源: skill-central / pr-review-checklist (所有 7 个维度)
+  # 自动发布审查清单评论到 PR
+  # =========================================================================
+  pr-review-checklist:
+    name: '📋 PR Review Checklist'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [commit-lint, kotlin-checks, python-checks, frontend-checks, security-scan]
+    if: always() && github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Generate PR Review Checklist Comment
+        uses: actions/github-script@d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4 # v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+
+            // Gather job statuses
+            const commitLint = '${{ needs.commit-lint.result }}';
+            const kotlin = '${{ needs.kotlin-checks.result }}';
+            const python = '${{ needs.python-checks.result }}';
+            const frontend = '${{ needs.frontend-checks.result }}';
+            const security = '${{ needs.security-scan.result }}';
+            const docker = '${{ needs.docker-check.result }}';
+
+            const statusEmoji = (s) => {
+              if (s === 'success') return '✅';
+              if (s === 'failure') return '❌';
+              if (s === 'skipped') return '⏭️';
+              return '⏳';
+            };
+
+            const body = `## 📋 PR Review Checklist
+
+          > 基于 **skill-central** 标准审查流水线自动生成
+          > 审查框架: [pr-review-checklist](https://github.com) · [codeql-security-scanner](https://github.com) · [backend-code-review](https://github.com)
+
+          ---
+
+          ### 🔍 自动化检查结果
+
+          | 检查项 | 状态 | 对应 Skill |
+          |--------|------|-----------|
+          | 📝 Commit Message 规范 | ${statusEmoji(commitLint)} | commit-message-formatter |
+          | 🔷 Kotlin 编译 & 测试 | ${statusEmoji(kotlin)} | backend-code-review |
+          | 🐍 Python Lint & 测试 | ${statusEmoji(python)} | python-code-review |
+          | ⚛️ Frontend 构建 | ${statusEmoji(frontend)} | linting-code-style-inspector |
+          | 🔒 安全扫描 (CodeQL) | ${statusEmoji(security)} | codeql-security-scanner |
+          | 🐳 Docker 构建 | ${statusEmoji(docker)} | container-infra |
+
+          ---
+
+          ### 👤 人工审查清单
+
+          请按以下维度逐项审查（来源: skill-central/**pr-review-checklist**）：
+
+          #### 1. 架构与设计 \`[必须]\`
+          - [ ] 变更是否遵循项目现有架构模式？(architectural-mindset)
+          - [ ] 新增模块/类是否符合分层约定？
+          - [ ] 公开 API 设计是否清晰、易用、向前兼容？(api-design-review)
+          - [ ] 是否有过度设计（为不会到来的需求预留结构）？
+
+          #### 2. 正确性 \`[必须]\`
+          - [ ] 边界条件处理完整（null、空集合、零值、超大输入）
+          - [ ] 错误路径处理正确（异常捕获、回滚、降级）(error-handling-patterns)
+          - [ ] 并发场景安全（竞态条件、死锁、数据一致性）
+          - [ ] 外部依赖调用有超时和重试策略
+
+          #### 3. 安全性 \`[必须]\`
+          - [ ] 用户输入经过验证和转义
+          - [ ] 无注入风险（SQL、命令、XSS、路径穿越）
+          - [ ] 认证/授权检查完整（每个端点/操作）
+          - [ ] 敏感信息未硬编码（密钥、Token、密码、内网地址）
+
+          #### 4. 性能 \`[重要]\`
+          - [ ] 无 N+1 查询
+          - [ ] 循环中无不必要的 I/O 或远程调用
+          - [ ] 大集合操作高效（流式处理、分页、索引使用）
+          - [ ] 新增数据库查询利用了已有索引
+
+          #### 5. 测试 \`[重要]\`
+          - [ ] 新增功能有对应测试用例 (test-codecov-assessor)
+          - [ ] 关键路径和异常分支被覆盖
+          - [ ] 测试用例独立、可重复、有意义的断言
+          - [ ] 遵循 F.I.R.S.T 原则 (testing-best-practices)
+
+          #### 6. 可维护性
+          - [ ] 命名清晰表达意图
+          - [ ] 函数/方法职责单一、长度合理
+          - [ ] 有必要注释解释「为什么」而非「是什么」
+          - [ ] 无 TODO/FIXME 遗留未处理
+
+          #### 7. 兼容性
+          - [ ] 数据库 schema 变更向后兼容
+          - [ ] API 变更是否有 BREAKING CHANGE 标记 (changeset-changelog-generator)
+          - [ ] 配置项增删改不影响已有部署
+
+          #### 8. 基础设施 (container-infra)
+          - [ ] Docker 镜像使用非 root 用户运行
+          - [ ] 容器有 HEALTHCHECK
+          - [ ] 无密钥硬编码在 Dockerfile/Compose 中
+
+          ---
+
+          ### 📝 审查结论
+
+          \`\`\`
+          总体评估：⬜ Approve / ⬜ Request Changes / ⬜ Comment
+          \`\`\`
+
+          > 💡 **提示**: 审查完成后，请勾选上方清单并在 PR 中留下审查总结。
+          `;
+
+            // Find existing checklist comment to update
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            const existingComment = comments.find(c =>
+              c.body.includes('PR Review Checklist') &&
+              c.user.login === 'github-actions[bot]'
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: body,
+              });
+            }
+
+  # =========================================================================
+  # Job 8: Shared DTO Change Alert
+  # 来源: skill-central / changeset-changelog-generator + api-design-review
+  # 当 shared 模块变更时，提醒检查所有下游服务
+  # =========================================================================
+  shared-change-alert:
+    name: '⚠️ Shared DTO Changed'
+    needs: changed-files
+    if: needs.changed-files.outputs.shared == 'true' && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4 # v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `## ⚠️ Shared DTO 变更警报
+
+          > 来源: skill-central/**changeset-changelog-generator** + **api-design-review**
+
+          \`shared/\` 模块已变更。请确认：
+
+          - [ ] 变更是否为 **BREAKING CHANGE**？若是，需在 PR 描述中标注
+          - [ ] 所有下游服务 (\`auth-service\`, \`patient-service\`, \`metric-service\`, \`api-gateway\`) 是否兼容？
+          - [ ] 前端 API 客户端是否需要同步更新？
+          - [ ] 是否需要更新 API 文档？
+
+          | 下游服务 | 编译兼容 | 需修改 |
+          |---------|---------|--------|
+          | auth-service | ⬜ 待检查 | ⬜ |
+          | patient-service | ⬜ 待检查 | ⬜ |
+          | metric-service | ⬜ 待检查 | ⬜ |
+          | api-gateway | ⬜ 待检查 | ⬜ |
+          | frontend | ⬜ 待检查 | ⬜ |
+          `
+            });

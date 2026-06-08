@@ -43,3 +43,64 @@ out/
 .claude/
 *.doc
 *.docx
+
+### Environment & Secrets ###
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+### macOS ###
+.DS_Store
+.AppleDouble
+.LSOverride
+
+### Node / Frontend ###
+node_modules/
+/frontend/dist/
+/frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+### Python ###
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+dist/
+eggs/
+.eggs/
+*.manifest
+*.spec
+
+### Logs ###
+*.log
+*.log.*
+
+### Database ###
+*.db
+*.sqlite
+*.sqlite3
+
+### Docker ###
+.docker/
+*.tar
+
+### Archives ###
+*.zip
+*.tar.gz
+*.rar
+
+### OS generated files ###
+Thumbs.db
+ehthumbs.db
+Desktop.ini

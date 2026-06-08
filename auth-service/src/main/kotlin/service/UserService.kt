@@ -513,6 +513,11 @@ class UserService(
         val existingUser = userRepository.findUserById(userId)
             ?: throw AuthException.UserNotFoundException()
 
+        // 检查用户是否已被删除
+        if (existingUser.isDeleted) {
+            throw AuthException.UserNotFoundException()
+        }
+
         return userRepository.deleteUser(userId)
     }
 
