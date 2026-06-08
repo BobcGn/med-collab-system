@@ -188,7 +188,7 @@ jobs:
           NC='\033[0m'
 
           ISSUES=0
-          for df in $(find . -name 'Dockerfile' -not -path './node_modules/*' -not -path './.git/*'); do
+          while IFS= read -r df; do
             echo ""
             echo "--- $df ---"
 
@@ -226,7 +226,7 @@ jobs:
               EXPOSED=$(grep "EXPOSE" "$df")
               echo "   暴露端口: $EXPOSED"
             fi
-          done
+          done < <(find . -name 'Dockerfile' -not -path './node_modules/*' -not -path './.git/*')
 
           if [ "$ISSUES" -gt 0 ]; then
             echo ""

@@ -75,9 +75,9 @@ jobs:
 
       - name: Check for BREAKING CHANGE footer
         if: always()
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          PR_BODY="${{ github.event.pull_request.body }}"
-          # 不强制，但提醒缺失
           if echo "$PR_BODY" | grep -qi "breaking change"; then
             echo "✅ BREAKING CHANGE 已标注"
           fi
@@ -317,7 +317,7 @@ jobs:
       - name: Check Dockerfile Best Practices
         run: |
           echo "=== Checking Dockerfiles for skill-central/container-infra compliance ==="
-          for df in $(find . -name 'Dockerfile' -not -path './node_modules/*' -not -path './.git/*'); do
+          find . -name 'Dockerfile' -not -path './node_modules/*' -not -path './.git/*' -print0 | while IFS= read -r -d '' df; do
             echo "--- $df ---"
             # Check non-root user
             if grep -q "USER" "$df"; then
@@ -341,7 +341,7 @@ jobs:
   pr-review-checklist:
     name: '📋 PR Review Checklist'
     runs-on: ubuntu-latest
-    needs: [commit-lint, kotlin-checks, python-checks, frontend-checks, security-scan]
+    needs: [commit-lint, kotlin-checks, python-checks, frontend-checks, security-scan, docker-check]
     if: always() && github.event_name == 'pull_request'
 
     steps:
