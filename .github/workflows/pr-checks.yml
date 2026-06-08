@@ -341,7 +341,6 @@ jobs:
   pr-review-checklist:
     name: '📋 PR Review Checklist'
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     needs: [commit-lint, kotlin-checks, python-checks, frontend-checks, security-scan]
     if: always() && github.event_name == 'pull_request'
 
@@ -373,86 +372,88 @@ jobs:
               return '⏳';
             };
 
-            const body = `## 📋 PR Review Checklist
+            const lines = [];
+            lines.push('## 📋 PR Review Checklist');
+            lines.push('');
+            lines.push('> 基于 **skill-central** 标准审查流水线自动生成');
+            lines.push('> 审查框架: pr-review-checklist · codeql-security-scanner · backend-code-review');
+            lines.push('');
+            lines.push('---');
+            lines.push('');
+            lines.push('### 🔍 自动化检查结果');
+            lines.push('');
+            lines.push('| 检查项 | 状态 | 对应 Skill |');
+            lines.push('|--------|------|-----------|');
+            lines.push(`| 📝 Commit Message 规范 | ${statusEmoji(commitLint)} | commit-message-formatter |`);
+            lines.push(`| 🔷 Kotlin 编译 & 测试 | ${statusEmoji(kotlin)} | backend-code-review |`);
+            lines.push(`| 🐍 Python Lint & 测试 | ${statusEmoji(python)} | python-code-review |`);
+            lines.push(`| ⚛️ Frontend 构建 | ${statusEmoji(frontend)} | linting-code-style-inspector |`);
+            lines.push(`| 🔒 安全扫描 (CodeQL) | ${statusEmoji(security)} | codeql-security-scanner |`);
+            lines.push(`| 🐳 Docker 构建 | ${statusEmoji(docker)} | container-infra |`);
+            lines.push('');
+            lines.push('---');
+            lines.push('');
+            lines.push('### 👤 人工审查清单');
+            lines.push('');
+            lines.push('请按以下维度逐项审查（来源: skill-central/pr-review-checklist）：');
+            lines.push('');
+            lines.push('#### 1. 架构与设计 `[必须]`');
+            lines.push('- [ ] 变更是否遵循项目现有架构模式？(architectural-mindset)');
+            lines.push('- [ ] 新增模块/类是否符合分层约定？');
+            lines.push('- [ ] 公开 API 设计是否清晰、易用、向前兼容？(api-design-review)');
+            lines.push('- [ ] 是否有过度设计（为不会到来的需求预留结构）？');
+            lines.push('');
+            lines.push('#### 2. 正确性 `[必须]`');
+            lines.push('- [ ] 边界条件处理完整（null、空集合、零值、超大输入）');
+            lines.push('- [ ] 错误路径处理正确（异常捕获、回滚、降级）(error-handling-patterns)');
+            lines.push('- [ ] 并发场景安全（竞态条件、死锁、数据一致性）');
+            lines.push('- [ ] 外部依赖调用有超时和重试策略');
+            lines.push('');
+            lines.push('#### 3. 安全性 `[必须]`');
+            lines.push('- [ ] 用户输入经过验证和转义');
+            lines.push('- [ ] 无注入风险（SQL、命令、XSS、路径穿越）');
+            lines.push('- [ ] 认证/授权检查完整（每个端点/操作）');
+            lines.push('- [ ] 敏感信息未硬编码（密钥、Token、密码、内网地址）');
+            lines.push('');
+            lines.push('#### 4. 性能 `[重要]`');
+            lines.push('- [ ] 无 N+1 查询');
+            lines.push('- [ ] 循环中无不必要的 I/O 或远程调用');
+            lines.push('- [ ] 大集合操作高效（流式处理、分页、索引使用）');
+            lines.push('- [ ] 新增数据库查询利用了已有索引');
+            lines.push('');
+            lines.push('#### 5. 测试 `[重要]`');
+            lines.push('- [ ] 新增功能有对应测试用例 (test-codecov-assessor)');
+            lines.push('- [ ] 关键路径和异常分支被覆盖');
+            lines.push('- [ ] 测试用例独立、可重复、有意义的断言');
+            lines.push('- [ ] 遵循 F.I.R.S.T 原则 (testing-best-practices)');
+            lines.push('');
+            lines.push('#### 6. 可维护性');
+            lines.push('- [ ] 命名清晰表达意图');
+            lines.push('- [ ] 函数/方法职责单一、长度合理');
+            lines.push('- [ ] 有必要注释解释「为什么」而非「是什么」');
+            lines.push('- [ ] 无 TODO/FIXME 遗留未处理');
+            lines.push('');
+            lines.push('#### 7. 兼容性');
+            lines.push('- [ ] 数据库 schema 变更向后兼容');
+            lines.push('- [ ] API 变更是否有 BREAKING CHANGE 标记 (changeset-changelog-generator)');
+            lines.push('- [ ] 配置项增删改不影响已有部署');
+            lines.push('');
+            lines.push('#### 8. 基础设施 (container-infra)');
+            lines.push('- [ ] Docker 镜像使用非 root 用户运行');
+            lines.push('- [ ] 容器有 HEALTHCHECK');
+            lines.push('- [ ] 无密钥硬编码在 Dockerfile/Compose 中');
+            lines.push('');
+            lines.push('---');
+            lines.push('');
+            lines.push('### 📝 审查结论');
+            lines.push('');
+            lines.push('```');
+            lines.push('总体评估：⬜ Approve / ⬜ Request Changes / ⬜ Comment');
+            lines.push('```');
+            lines.push('');
+            lines.push('> 💡 **提示**: 审查完成后，请勾选上方清单并在 PR 中留下审查总结。');
 
-          > 基于 **skill-central** 标准审查流水线自动生成
-          > 审查框架: [pr-review-checklist](https://github.com) · [codeql-security-scanner](https://github.com) · [backend-code-review](https://github.com)
-
-          ---
-
-          ### 🔍 自动化检查结果
-
-          | 检查项 | 状态 | 对应 Skill |
-          |--------|------|-----------|
-          | 📝 Commit Message 规范 | ${statusEmoji(commitLint)} | commit-message-formatter |
-          | 🔷 Kotlin 编译 & 测试 | ${statusEmoji(kotlin)} | backend-code-review |
-          | 🐍 Python Lint & 测试 | ${statusEmoji(python)} | python-code-review |
-          | ⚛️ Frontend 构建 | ${statusEmoji(frontend)} | linting-code-style-inspector |
-          | 🔒 安全扫描 (CodeQL) | ${statusEmoji(security)} | codeql-security-scanner |
-          | 🐳 Docker 构建 | ${statusEmoji(docker)} | container-infra |
-
-          ---
-
-          ### 👤 人工审查清单
-
-          请按以下维度逐项审查（来源: skill-central/**pr-review-checklist**）：
-
-          #### 1. 架构与设计 \`[必须]\`
-          - [ ] 变更是否遵循项目现有架构模式？(architectural-mindset)
-          - [ ] 新增模块/类是否符合分层约定？
-          - [ ] 公开 API 设计是否清晰、易用、向前兼容？(api-design-review)
-          - [ ] 是否有过度设计（为不会到来的需求预留结构）？
-
-          #### 2. 正确性 \`[必须]\`
-          - [ ] 边界条件处理完整（null、空集合、零值、超大输入）
-          - [ ] 错误路径处理正确（异常捕获、回滚、降级）(error-handling-patterns)
-          - [ ] 并发场景安全（竞态条件、死锁、数据一致性）
-          - [ ] 外部依赖调用有超时和重试策略
-
-          #### 3. 安全性 \`[必须]\`
-          - [ ] 用户输入经过验证和转义
-          - [ ] 无注入风险（SQL、命令、XSS、路径穿越）
-          - [ ] 认证/授权检查完整（每个端点/操作）
-          - [ ] 敏感信息未硬编码（密钥、Token、密码、内网地址）
-
-          #### 4. 性能 \`[重要]\`
-          - [ ] 无 N+1 查询
-          - [ ] 循环中无不必要的 I/O 或远程调用
-          - [ ] 大集合操作高效（流式处理、分页、索引使用）
-          - [ ] 新增数据库查询利用了已有索引
-
-          #### 5. 测试 \`[重要]\`
-          - [ ] 新增功能有对应测试用例 (test-codecov-assessor)
-          - [ ] 关键路径和异常分支被覆盖
-          - [ ] 测试用例独立、可重复、有意义的断言
-          - [ ] 遵循 F.I.R.S.T 原则 (testing-best-practices)
-
-          #### 6. 可维护性
-          - [ ] 命名清晰表达意图
-          - [ ] 函数/方法职责单一、长度合理
-          - [ ] 有必要注释解释「为什么」而非「是什么」
-          - [ ] 无 TODO/FIXME 遗留未处理
-
-          #### 7. 兼容性
-          - [ ] 数据库 schema 变更向后兼容
-          - [ ] API 变更是否有 BREAKING CHANGE 标记 (changeset-changelog-generator)
-          - [ ] 配置项增删改不影响已有部署
-
-          #### 8. 基础设施 (container-infra)
-          - [ ] Docker 镜像使用非 root 用户运行
-          - [ ] 容器有 HEALTHCHECK
-          - [ ] 无密钥硬编码在 Dockerfile/Compose 中
-
-          ---
-
-          ### 📝 审查结论
-
-          \`\`\`
-          总体评估：⬜ Approve / ⬜ Request Changes / ⬜ Comment
-          \`\`\`
-
-          > 💡 **提示**: 审查完成后，请勾选上方清单并在 PR 中留下审查总结。
-          `;
+            const body = lines.join('\n');
 
             // Find existing checklist comment to update
             const { data: comments } = await github.rest.issues.listComments({
@@ -496,27 +497,29 @@ jobs:
       - uses: actions/github-script@d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4 # v7
         with:
           script: |
+            const lines = [];
+            lines.push('## ⚠️ Shared DTO 变更警报');
+            lines.push('');
+            lines.push('> 来源: skill-central/changeset-changelog-generator + api-design-review');
+            lines.push('');
+            lines.push('`shared/` 模块已变更。请确认：');
+            lines.push('');
+            lines.push('- [ ] 变更是否为 **BREAKING CHANGE**？若是，需在 PR 描述中标注');
+            lines.push('- [ ] 所有下游服务 (`auth-service`, `patient-service`, `metric-service`, `api-gateway`) 是否兼容？');
+            lines.push('- [ ] 前端 API 客户端是否需要同步更新？');
+            lines.push('- [ ] 是否需要更新 API 文档？');
+            lines.push('');
+            lines.push('| 下游服务 | 编译兼容 | 需修改 |');
+            lines.push('|---------|---------|--------|');
+            lines.push('| auth-service | ⬜ 待检查 | ⬜ |');
+            lines.push('| patient-service | ⬜ 待检查 | ⬜ |');
+            lines.push('| metric-service | ⬜ 待检查 | ⬜ |');
+            lines.push('| api-gateway | ⬜ 待检查 | ⬜ |');
+            lines.push('| frontend | ⬜ 待检查 | ⬜ |');
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
-              body: `## ⚠️ Shared DTO 变更警报
-
-          > 来源: skill-central/**changeset-changelog-generator** + **api-design-review**
-
-          \`shared/\` 模块已变更。请确认：
-
-          - [ ] 变更是否为 **BREAKING CHANGE**？若是，需在 PR 描述中标注
-          - [ ] 所有下游服务 (\`auth-service\`, \`patient-service\`, \`metric-service\`, \`api-gateway\`) 是否兼容？
-          - [ ] 前端 API 客户端是否需要同步更新？
-          - [ ] 是否需要更新 API 文档？
-
-          | 下游服务 | 编译兼容 | 需修改 |
-          |---------|---------|--------|
-          | auth-service | ⬜ 待检查 | ⬜ |
-          | patient-service | ⬜ 待检查 | ⬜ |
-          | metric-service | ⬜ 待检查 | ⬜ |
-          | api-gateway | ⬜ 待检查 | ⬜ |
-          | frontend | ⬜ 待检查 | ⬜ |
-          `
+              body: lines.join('\n'),
             });
