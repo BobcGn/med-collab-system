@@ -9,6 +9,8 @@
 #   - A08:2021 Software and Data Integrity Failures
 #
 # 同时执行: 秘密扫描、依赖漏洞检查、Dockerfile 安全审查
+#
+# 所有第三方 Action 已 pin 到具体 commit SHA (skill-central best practice)
 # ============================================================================
 
 name: Scheduled Security Audit
@@ -18,15 +20,6 @@ on:
     # 每天 08:57 UTC (北京时间 ~16:57) 执行
     - cron: '57 8 * * *'
   workflow_dispatch:
-    inputs:
-      scan_depth:
-        description: '扫描深度 (quick/full)'
-        required: true
-        default: 'full'
-        type: choice
-        options:
-          - quick
-          - full
 
 permissions:
   security-events: write
@@ -47,10 +40,10 @@ jobs:
         language: ['java-kotlin', 'python', 'javascript-typescript']
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 # v3
+        uses: github/codeql-action/init@9887d98ae49f1f598651b556d8c8f02f3ea065cb # v3.27.0
         with:
           languages: ${{ matrix.language }}
           queries: security-extended,security-and-quality
@@ -63,7 +56,7 @@ jobs:
 
       - name: Setup Java (for Kotlin analysis)
         if: matrix.language == 'java-kotlin'
-        uses: actions/setup-java@3a4f6e1af2c07e17e6e3b4b5c0b6e1a5d0e8f9c0 # v4
+        uses: actions/setup-java@9704b39bf258b59bc04b50fa2dd55e9ed76b47a8 # v4.1.0
         with:
           java-version: '21'
           distribution: 'temurin'
@@ -73,27 +66,25 @@ jobs:
         run: ./gradlew compileKotlin --no-daemon -q || true
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1 # v3
+        uses: github/codeql-action/analyze@9887d98ae49f1f598651b556d8c8f02f3ea065cb # v3.27.0
         with:
           category: '/language:${{ matrix.language }}'
 
   # =========================================================================
   # Secret Scanning — 硬编码密钥/Token/密码检测
-  # 来源: skill-central / codeql-security-scanner § 硬编码敏感信息检测
-  # 检查: API Key, Token, Password, 数据库连接字符串, 内网地址, JWT secret
   # =========================================================================
   secret-scan:
     name: 'Secret Detection'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
 
       - name: Run Gitleaks
-        uses: gitleaks/gitleaks-action@d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3 # v2
+        uses: gitleaks/gitleaks-action@e7168103501562d92f3f52e2c69c253cff74438d # v2.3.1
         env:
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
         with:
           config-path: .github/gitleaks.toml
@@ -105,7 +96,6 @@ jobs:
           GREEN='\033[0;32m'
           NC='\033[0m'
 
-          # 检测模式 (对应 codeql-security-scanner 硬编码敏感信息检测规则)
           PATTERNS=(
             "api[_-]?key\s*[:=]\s*['\"][^'\"]{8,}['\"]|API_KEY"
             "secret\s*[:=]\s*['\"][^'\"]{8,}['\"]"
@@ -120,7 +110,6 @@ jobs:
 
           FOUND=0
           for pattern in "${PATTERNS[@]}"; do
-            # 排除测试文件和配置模板
             MATCHES=$(grep -rIn "$pattern" --include="*.kt" --include="*.py" \
               --include="*.ts" --include="*.tsx" --include="*.js" \
               --include="*.json" --include="*.yaml" --include="*.yml" \
@@ -144,13 +133,12 @@ jobs:
 
   # =========================================================================
   # Dependency Vulnerability Check
-  # 来源: skill-central / codeql-security-scanner § 依赖与工作流安全
   # =========================================================================
   dependency-check:
     name: 'Dependency Audit'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
 
       - name: Gradle dependency verification
         run: |
@@ -171,13 +159,12 @@ jobs:
 
   # =========================================================================
   # Dockerfile Security Check
-  # 来源: skill-central / container-infra § Image hygiene + Security
   # =========================================================================
   dockerfile-audit:
     name: 'Dockerfile Security'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
 
       - name: Dockerfile Security Scan (skill-central container-infra rules)
         run: |
