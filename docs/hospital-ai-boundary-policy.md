@@ -1,3 +1,12 @@
+---
+id: hospital-ai-boundary
+type: architecture-design
+title: 医院生产环境 AI 职责边界
+status: draft
+parent: med-collab-architecture
+tags: [medical-safety, policy]
+---
+
 # 医院生产环境 AI 边界与策略图说明
 
 ## 1. 目标
@@ -110,7 +119,7 @@ flowchart LR
 - 受控结构化分析子图
 - 正式报告生成子图
 
-并且策略图与实际运行入口共用同一套受控流水线函数。
+策略图与实际运行入口复用受控分析和报告工具函数，但实际 HTTP / WebSocket 入口直接执行 `executeControlledMetricReportPipeline`，并未运行 `metricReportStrategy` 图。图内“登记正式报告”节点当前只打印日志，不代表业务数据库登记；实际生成、确认及登记关系见 `med-collab-architecture`。
 
 ### 5.2 路由入口
 
@@ -130,10 +139,12 @@ flowchart LR
 
 当前正式影像分析链路已对接独立 Python `segmentation-service`：
 
-- `metric-service` 默认调用 `segmentation-service` 的 `POST /api/v1/segment`
-- 分割服务返回的结构化区域、质量门禁、模型信息和工件路径会映射为正式分析 payload
+- 仅在显式启用 `METRIC_SEGMENTATION_SERVICE_ENABLED=true` 后，`metric-service` 才调用 `segmentation-service` 的 `POST /api/v1/segment`；当前默认关闭，使用本地启发式像素分析，并非默认使用已训练 U-Net
+- 分割服务返回的结构化区域、质量门禁、模型信息和工件存在信息会映射为分析 payload；当前未完整保留工件路径和模型审计元数据
 - 分割服务不可用、契约不匹配、质量门禁失败或无结构化区域时，链路失败并进入人工复核提示
 - 不允许在分割服务失败时回退到 LLM 生成医学结论
+
+上述规则描述远程分割启用后的接收边界，不表示默认本地启发式链路或任何已加载权重已经过医学有效性验证。确定性算法、`weights_loaded=true` 和 PDF 生成成功均不能独立证明临床可用性；已确认的指标语义限制见 `segmentation-service` 和 `metric-agent-harness`。
 
 ### 5.4 LLM 配置
 
