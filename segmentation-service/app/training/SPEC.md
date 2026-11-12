@@ -38,7 +38,7 @@ tags: [training, evaluation, coursework]
 
 FP32、UNet2D、Adam、BCEWithLogitsLoss + 逐图 Soft Dice；学习目标包含空标注样本。auto 优先 MPS 再 CPU，显式指定不可用 MPS 则报错；记录设备、依赖版本、seed 与超参数，不承诺跨设备逐位复现。
 
-仅训练 train，按原尺寸 val macro Dice 的严格改善选择最佳权重，同分保留较早 epoch；支持有界 epoch 和可选 patience。最后 checkpoint 保存优化器与训练进度，但不提供任意 pickle 恢复入口。导出的受限 state_dict 和 manifest 才是推理输入。
+仅训练 train，按原尺寸 val macro Dice 的严格改善选择最佳权重，同分保留较早 epoch；支持有界 epoch 和可选 patience。最后 checkpoint 保存优化器与训练进度，但不提供 resume CLI 或任意 pickle 恢复入口；最佳包由训练自动导出，也没有独立 export CLI。导出的受限 state_dict 和 manifest 才是推理输入。
 
 输出目录必须是新目录或空目录，不能覆盖数据清单、已有曲线或 checkpoint。此约束源于曾发现同目录 history.json 清单会被训练历史覆盖的缺陷；不能通过仅列出少数已知输出名来替代目录隔离。
 
@@ -54,7 +54,7 @@ FP32、UNet2D、Adam、BCEWithLogitsLoss + 逐图 Soft Dice；学习目标包含
 
 M5 / 32 GiB、Torch 2.15.0、FP32、256×256、base_channels=32、batch=2、Adam lr=0.001、seed=42、概率阈值 0.5、最多 20 epoch / patience=5。无增强运行 11 轮、最佳第 6 轮；成对翻转增强运行 20 轮、最佳第 18 轮。验证集 raw Dice 分别为 0.61535 / 0.65516，由验证集预先选增强模型。
 
-只在 118 张验证图上比较 BFS 最小区域 [1,16,64,256,1024]，按 macro Dice 选 1024 个原图像素，同分偏向较小阈值；在评测测试图前写入并哈希封存 validation-selection.json。部署必须显式使用同一 1024，服务默认 16 不是本次实验设置。
+只在 118 张验证图上比较 BFS 最小区域 [1,16,64,256,1024]，按 macro Dice 选 1024 个原图像素，同分偏向较小阈值；在评测测试图前写入并哈希封存 validation-selection.json。部署必须显式使用同一 1024，研究包无显式覆盖的默认 16 不是本次实验设置；不能混同旧配置默认或以导入示例环境代替冻结记录。
 
 116 张封存测试图（96 有前景、20 空标注）的 macro Dice / IoU：Otsu 为 0.14445 / 0.08805，UNet 基线为 0.59852 / 0.50481，增强 UNet 为 0.63654 / 0.54637，增强 + BFS 为 0.65516 / 0.56594。补充对照“基线 + 同一 BFS”Dice 为 0.64269，其空标注误检少于增强模型，不能声称增强模型在所有指标上占优。
 

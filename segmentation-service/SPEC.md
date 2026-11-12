@@ -30,7 +30,7 @@ Python 服务拥有影像解码、模型预处理与执行、mask 后处理、�
 
 通过 model.manifest_path / SEGMENTATION_SERVICE_MODEL_MANIFEST_PATH 加载课程包时，先校验 manifest、预处理版本、权重哈希与结构，再派生所有阶段共用的有效设置，强制 Torch、禁用随机权重，拒绝不匹配/缺失/损坏文件。尺寸、通道和概率阈值以包为准，不允许部署环境静默改写训练契约。原始 checkpoint 也使用受限 weights_only 加载。
 
-BFS 默认最小区域为 16 原图像素以匹配评测；显式 Settings 参数、自定义 TOML 或环境变量可覆盖。随仓库提供的旧 TOML 中默认 24 不视为课程显式覆盖。研究包总是取消物理间距，不能通过设置全局间距恢复未经标定的毫米。服务设备不可用时仍可能按既有逻辑回到 CPU，实际设备由描述符记录。
+研究包无显式覆盖时，BFS 默认最小区域为 16 原图像素以匹配评测；旧 Settings/local 为24，test TOML 为8，不是统一服务默认。显式 Settings 参数、自定义 TOML 或环境变量可覆盖。随仓库提供的旧 TOML 中默认 24 不视为课程显式覆盖。研究包总是取消物理间距，不能通过设置全局间距恢复未经标定的毫米。服务设备不可用时仍可能按既有逻辑回到 CPU，实际设备由描述符记录。
 
 ## 输出的真实含义
 
@@ -40,7 +40,9 @@ BFS 默认最小区域为 16 原图像素以匹配评测；显式 Settings 参�
 
 质量门禁对空 mask / 无区域返回 FAIL，低置信度或单区域覆盖过大返回 LIMITED，其余 PASS；PASS 不检查真实训练来源，随机/mock 输出也可能通过。结果状态与 HTTP 状态不同：质量失败仍可通过 HTTP 200 返回 failed payload。
 
-默认保存 mask、overlay、result.json，即使门禁失败也可能产生工件。输出 mask 使用与区域一致的 BFS 清理结果；return_contour 和 return_mask 生效，return_metrics 仍保留旧行为。请求 ID 必须是安全单目录组件，工件目录原子预留且不可覆盖。包内可追溯预处理/训练配置和权重哈希；元数据记录模型包哈希，但这不是对来源许可或效度的独立认证。/health 仅表示服务存活，模型通常仍在依赖首次解析时初始化。
+默认保存 mask、overlay、result.json，即使门禁失败也可能产生工件。输出 mask 使用与区域一致的 BFS 清理结果；return_contour 和 return_mask 生效，return_metrics 仍保留旧行为。请求 ID 必须是安全单目录组件，工件目录原子预留且不可覆盖；重复 ID 在写入阶段返回存储500，不是幂等命中，失败可能留下部分目录，批量先前工件也不回滚。包内可追溯预处理/训练配置和权重哈希；元数据记录模型包哈希，但这不是对来源许可或效度的独立认证。/health 仅表示原始设置下的服务存活，模型通常仍在依赖首次解析时初始化，不是 readiness；工件路径不是 URL，当前无下载端点。
+
+[API 参考](API.md)维护实际字段/错误和输出选项；配置与设备的操作差异见[手册](../docs/segmentation-service-operation-manual.md)。配置只选一个 TOML，未知环境回 local，环境覆盖后再派生包约束，无 dotenv 或热更新；不能把操作示例当作新的后端能力。
 
 ## 训练与服务边界
 

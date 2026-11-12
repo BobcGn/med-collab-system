@@ -20,6 +20,8 @@ tags: [medical-safety, policy]
 
 ## 2. 角色边界
 
+本节规定允许与禁止的职责，不表示所有能力或临床权限已经实现。当前真实入口、默认启发式限制及未完成项见第5节；规范约束不得被旧提案或界面文案替代。
+
 ### 2.1 U-Net / 结构化分析工具
 
 允许承担的职责：
@@ -71,17 +73,19 @@ tags: [medical-safety, policy]
 
 科研报告只陈述可验证的分割与几何量，不补充血流、良恶性或临床风险。无物理标定不得制造毫米测量，无校准不得填入固定临床置信度；用途或关键契约缺失时拒绝处理，而不是静默降级。具体跨语言字段由 `segmentation-service` 和 `metric-agent-harness` 定义。
 
-## 3. 新的受控策略图
+## 3. 目标受控执行约束
+
+以下是职责与校验的目标约束，不是当前Koog执行轨迹、医院上线证明或登记事务保证。当前路由直接调用受控函数，生成后由浏览器另行发起持久化；实际实现见第5节和 `med-collab-architecture`。
 
 ```mermaid
 flowchart LR
     A[接收结构化请求] --> B[强制职责边界校验]
     B --> C[调用 U-Net/确定性结构化分析工具]
     C --> D[校验结构化分析契约]
-    D --> E[调用正式报告生成工具]
-    E --> F[校验报告与分析一致性]
-    F --> G[登记正式报告]
-    G --> H[输出正式结果]
+    D --> E[调用用途受限的报告生成工具]
+    E --> F[校验报告与分析及用途一致性]
+    F --> G[满足受控登记要求]
+    G --> H[输出受控结果]
 ```
 
 ## 4. 策略图的强制规则
@@ -119,7 +123,7 @@ flowchart LR
 
 - `metric-service/src/main/kotlin/aiagent/strategy/StrategyGraph.kt`
 
-当前已改为：
+策略图定义包含：
 
 - 受控请求受理子图
 - 受控结构化分析子图
@@ -131,7 +135,7 @@ flowchart LR
 
 - `metric-service/src/main/kotlin/Routing.kt`
 
-当前已改为：
+当前入口行为：
 
 - 图片分析只走受控结构化流水线
 - 结构化流水线失败时，不再回退到 LLM 生成影像分析
@@ -143,10 +147,10 @@ flowchart LR
 - `metric-service/src/main/kotlin/aiagent/tools/SegmentationServiceClient.kt`
 - `metric-service/src/main/kotlin/aiagent/tools/MedicalImageAnalyzerTool.kt`
 
-当前正式影像分析链路已对接独立 Python `segmentation-service`：
+当前远程分割接收分支已对接独立 Python `segmentation-service`：
 
 - 仅在显式启用 `METRIC_SEGMENTATION_SERVICE_ENABLED=true` 后，`metric-service` 才调用 `segmentation-service` 的 `POST /api/v1/segment`；当前默认关闭，使用本地启发式像素分析，并非默认使用已训练 U-Net
-- 分割服务返回的结构化区域、质量门禁、模型信息和工件存在信息会映射为分析 payload；当前未完整保留工件路径和模型审计元数据
+- 分割服务返回的结构化区域、质量门禁、模型摘要和工件存在信息会映射为分析 payload；research 已保留用途、包哈希及部分模型/门禁 keyIndicators，但不保留完整工件路径或原始模型响应。shared 持久化与前端转换还会进一步缩减字段，不能称为完整审计链
 - 分割服务不可用、契约不匹配、质量门禁失败或无结构化区域时，链路失败并进入人工复核提示
 - 不允许在分割服务失败时回退到 LLM 生成医学结论
 
@@ -158,7 +162,7 @@ flowchart LR
 
 当前已明确：
 
-- DeepSeek/Koog 仅为后续非诊断文本能力预留
+- DeepSeek/Koog 仅为后续非诊断文本能力预留，当前文本分支只是固定范围说明，不实际调用 LLM 或绑定历史报告进行多轮解释
 - 不参与正式影像分析与正式报告生成
 
 ## 6. 医院生产环境执行原则
@@ -173,7 +177,7 @@ flowchart LR
 
 ## 7. 最终结论
 
-医院生产环境的边界必须是硬边界，不是提示性边界。
+医院生产环境的边界必须是硬边界，不是提示性边界。本政策与文档同步不等于完整授权、数据/模型治理、可靠登记或临床验证已经实现；现有规范外观、PASS、CI成功或正式样式PDF不能豁免上线前置要求。
 
 因此当前链路的原则是：
 
