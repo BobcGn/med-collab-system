@@ -8,7 +8,11 @@ try:
 
     from app.core.config.settings import Settings
     from app.inference.engines.torch_unet_engine import TorchUNetEngine
-    from app.schemas.internal.segmentation import LoadedRasterImage, PreparedModelInput, PreparedSegmentationInput
+    from app.schemas.internal.segmentation import (
+        LoadedRasterImage,
+        PreparedModelInput,
+        PreparedSegmentationInput,
+    )
 except ModuleNotFoundError:  # pragma: no cover - local environment may not have dependencies yet.
     np = None
     torch = None
@@ -19,7 +23,9 @@ except ModuleNotFoundError:  # pragma: no cover - local environment may not have
     PreparedSegmentationInput = None
 
 
-@unittest.skipIf(np is None or torch is None or Settings is None, "torch runtime dependencies are not installed")
+@unittest.skipIf(
+    np is None or torch is None or Settings is None, "torch runtime dependencies are not installed"
+)
 class TorchUNetEngineTestCase(unittest.TestCase):
     def test_predict_returns_probability_map_from_real_unet(self) -> None:
         settings = Settings(

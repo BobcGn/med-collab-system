@@ -166,6 +166,27 @@ def test_tiny_cpu_training_export_and_original_size_holdout(
         torch.set_num_threads(previous_threads)
 
 
+@pytest.mark.parametrize("artifact", ["history.json", "curves.png", "checkpoints/last.pt"])
+def test_training_never_overwrites_existing_artifacts_or_input_manifest(
+    synthetic_manifest: Path, tmp_path: Path, artifact: str,
+) -> None:
+    output = tmp_path / "existing-output"
+    target = output / artifact
+    target.parent.mkdir(parents=True)
+    original_manifest = synthetic_manifest.read_bytes()
+    contents = original_manifest if artifact == "history.json" else b"do not overwrite"
+    target.write_bytes(contents)
+    input_manifest = target if artifact == "history.json" else synthetic_manifest
+    with pytest.raises(FileExistsError, match="new or empty directory"):
+        train_model(TrainConfig(
+            input_manifest, output, epochs=1, image_size=32, base_channels=8,
+            device="cpu", plots=False,
+        ))
+    assert target.read_bytes() == contents
+    assert synthetic_manifest.read_bytes() == original_manifest
+    assert not (output / "run.json").exists()
+
+
 def test_best_checkpoint_uses_only_val_dice_with_earliest_ties_and_patience(
     synthetic_manifest: Path,
     tmp_path: Path,

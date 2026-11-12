@@ -4,9 +4,15 @@ import time
 
 import numpy as np
 
-from app.core.config.settings import Settings
+from app.core.config.settings import (
+    Settings,
+    effective_model_settings,
+    validate_bundle_image_type,
+)
+from app.core.errors.exceptions import InferenceUnavailableError
 from app.domain.entities.model import ModelDescriptor
 from app.inference.backends.base import SegmentationBackend
+from app.postprocessing.mask_ops import remove_small_components
 from app.preprocessing.image_loader import ImageLoader
 from app.preprocessing.image_preprocessor import ImagePreprocessor
 from app.schemas.internal.segmentation import PreparedSegmentationInput, RawInferenceOutput
@@ -22,15 +28,32 @@ class SegmentationPipeline:
         image_loader: ImageLoader | None = None,
         image_preprocessor: ImagePreprocessor | None = None,
     ):
-        self.settings = settings
+        self.settings = effective_model_settings(settings)
         self.backend = backend
         self.image_loader = image_loader or ImageLoader()
-        self.image_preprocessor = image_preprocessor or ImagePreprocessor(settings)
+        self.image_preprocessor = image_preprocessor or ImagePreprocessor(self.settings)
+        if self.settings.bundle_manifest is not None:
+            descriptor = self.backend.describe_model()
+            if (
+                not descriptor.weights_loaded
+                or descriptor.backend != "torch_unet"
+                or descriptor.intended_use != "research"
+                or descriptor.bundle_manifest_sha256 != self.settings.bundle_manifest_sha256
+                or descriptor.supported_image_types != ["ULTRASOUND"]
+                or (descriptor.input_height, descriptor.input_width)
+                != (self.settings.input_height, self.settings.input_width)
+                or (descriptor.in_channels, descriptor.output_classes)
+                != (self.settings.in_channels, self.settings.output_classes)
+            ):
+                raise InferenceUnavailableError(
+                    message="Backend does not match the configured model bundle"
+                )
 
     def get_model_descriptor(self) -> ModelDescriptor:
         return self.backend.describe_model()
 
     def run(self, request: PreparedSegmentationInput) -> RawInferenceOutput:
+        validate_bundle_image_type(self.settings, request.image_type)
         loaded_image = self.image_loader.load(request)
         prepared_input = self.image_preprocessor.prepare(request, loaded_image)
         prediction = self.backend.predict(prepared_input)
@@ -40,7 +63,10 @@ class SegmentationPipeline:
             prediction.probability_map,
             loaded_image,
         )
-        binary_mask = (restored_probability_map >= self.settings.probability_threshold).astype(np.uint8)
+        binary_mask = remove_small_components(
+            (restored_probability_map >= self.settings.probability_threshold).astype(np.uint8),
+            self.settings.min_region_pixels,
+        )
         postprocess_ms = int((time.perf_counter() - start) * 1000)
 
         return RawInferenceOutput(

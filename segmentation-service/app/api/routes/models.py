@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies.services import get_segmentation_orchestrator
@@ -9,7 +11,7 @@ router = APIRouter(prefix="/models", tags=["models"])
 
 @router.get("/current", response_model=ModelInfoResponse)
 def current_model(
-    orchestrator: SegmentationOrchestrator = Depends(get_segmentation_orchestrator),
+    orchestrator: Annotated[SegmentationOrchestrator, Depends(get_segmentation_orchestrator)],
 ) -> ModelInfoResponse:
     """Return the active backend and U-Net runtime configuration."""
 
@@ -27,4 +29,7 @@ def current_model(
         output_classes=descriptor.output_classes,
         weights_path=descriptor.weights_path,
         weights_loaded=descriptor.weights_loaded,
+        intended_use=descriptor.intended_use,
+        bundle_manifest_sha256=descriptor.bundle_manifest_sha256,
+        supported_image_types=descriptor.supported_image_types,
     )

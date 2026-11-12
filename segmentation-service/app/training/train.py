@@ -303,8 +303,8 @@ def train_model(config: TrainConfig) -> dict[str, Any]:
     if not len(train_data) or not len(val_data):
         raise ValueError("Training requires nonempty, disjoint train and val splits")
     output = Path(config.output_dir)
-    if any((output / name).exists() for name in ("run.json", "history.csv", "best_model")):
-        raise FileExistsError("Training output already exists; choose a new output directory")
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise FileExistsError("Training output must be a new or empty directory")
     output.mkdir(parents=True, exist_ok=True)
     checkpoints = output / "checkpoints"
     checkpoints.mkdir(exist_ok=True)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.config.settings import Settings
+from app.core.config.settings import Settings, effective_model_settings
 from app.domain.entities.segmentation import SegmentationRegion
 from app.domain.value_objects.geometry import BoundingBox, ContourPoint
 from app.postprocessing.mask_ops import extract_region_computations
@@ -11,7 +11,7 @@ class SegmentationAssembler:
     """Transform masks and probabilities into API-facing region objects."""
 
     def __init__(self, settings: Settings):
-        self.settings = settings
+        self.settings = effective_model_settings(settings)
 
     def assemble(self, inference_output: RawInferenceOutput) -> list[SegmentationRegion]:
         computations = extract_region_computations(
@@ -23,18 +23,40 @@ class SegmentationAssembler:
             max_contour_points=self.settings.max_contour_points,
         )
 
+        research = self.settings.bundle_manifest is not None
         regions: list[SegmentationRegion] = []
         for computation in computations:
             regions.append(
                 SegmentationRegion(
                     region_id=computation.region_id,
-                    class_name=inference_output.class_name,
+                    class_name="target_region" if research else inference_output.class_name,
                     label=inference_output.label,
                     confidence=round(computation.mean_confidence, 4),
-                    location=_describe_location(computation.center_x_percent, computation.center_y_percent),
-                    severity=_describe_severity(computation.mean_confidence, computation.coverage_percent),
+                    location=(
+                        _describe_image_quadrant(
+                            computation.center_x_percent, computation.center_y_percent
+                        )
+                        if research
+                        else _describe_location(
+                            computation.center_x_percent, computation.center_y_percent
+                        )
+                    ),
+                    severity=(
+                        "not_assessed"
+                        if research
+                        else _describe_severity(
+                            computation.mean_confidence, computation.coverage_percent
+                        )
+                    ),
                     coverage_percent=round(computation.coverage_percent, 4),
-                    estimated_size_mm=round(computation.estimated_size_mm, 2),
+                    estimated_size_mm=(
+                        round(computation.estimated_size_mm, 2)
+                        if computation.estimated_size_mm is not None
+                        else None
+                    ),
+                    pixel_count=computation.pixel_count,
+                    width_px=computation.width_px,
+                    height_px=computation.height_px,
                     bounding_box=BoundingBox(
                         left_percent=computation.left_percent,
                         top_percent=computation.top_percent,
@@ -53,8 +75,16 @@ class SegmentationAssembler:
         return regions
 
 
+def _describe_image_quadrant(center_x_percent: float, center_y_percent: float) -> str:
+    horizontal = "left" if center_x_percent < 50 else "right"
+    vertical = "upper" if center_y_percent < 50 else "lower"
+    return f"{vertical}-{horizontal} image quadrant"
+
+
 def _describe_location(center_x_percent: float, center_y_percent: float) -> str:
-    horizontal = "left" if center_x_percent < 38 else "right" if center_x_percent > 62 else "central"
+    horizontal = (
+        "left" if center_x_percent < 38 else "right" if center_x_percent > 62 else "central"
+    )
     vertical = "upper" if center_y_percent < 38 else "lower" if center_y_percent > 62 else "mid"
 
     if horizontal == "central" and vertical == "mid":

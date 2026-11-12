@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 import numpy as np
+
+from app.postprocessing.mask_ops import remove_small_components as remove_small_components
 
 
 def _binary_mask(value: np.ndarray) -> np.ndarray:
@@ -82,32 +83,3 @@ def aggregate_metrics(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             else None
         ),
     }
-
-
-def remove_small_components(mask: np.ndarray, min_region_pixels: int) -> np.ndarray:
-    """Pure four-connected BFS cleanup, measured in original-image pixels."""
-    if min_region_pixels < 1:
-        raise ValueError("min_region_pixels must be at least 1")
-    foreground = _binary_mask(mask)
-    visited = np.zeros_like(foreground)
-    cleaned = np.zeros(foreground.shape, dtype=np.uint8)
-    height, width = foreground.shape
-    for start_y, start_x in np.argwhere(foreground):
-        if visited[start_y, start_x]:
-            continue
-        queue = deque([(int(start_y), int(start_x))])
-        visited[start_y, start_x] = True
-        component = []
-        while queue:
-            y, x = queue.popleft()
-            component.append((y, x))
-            for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-                ny, nx = y + dy, x + dx
-                if 0 <= ny < height and 0 <= nx < width:
-                    if foreground[ny, nx] and not visited[ny, nx]:
-                        visited[ny, nx] = True
-                        queue.append((ny, nx))
-        if len(component) >= min_region_pixels:
-            ys, xs = zip(*component, strict=True)
-            cleaned[ys, xs] = 1
-    return cleaned

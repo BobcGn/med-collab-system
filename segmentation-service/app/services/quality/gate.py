@@ -20,7 +20,9 @@ class QualityGateService:
             return QualityGateDecision(status="FAIL", reason="No foreground mask was produced")
 
         if not regions:
-            return QualityGateDecision(status="FAIL", reason="All detected regions were filtered out")
+            return QualityGateDecision(
+                status="FAIL", reason="All detected regions were filtered out"
+            )
 
         best_confidence = max(region.confidence for region in regions)
         max_coverage = max(region.coverage_percent for region in regions)
@@ -37,5 +39,7 @@ class QualityGateService:
                 reason="Foreground coverage is unusually large and should be reviewed manually",
             )
 
-        return QualityGateDecision(status="PASS", reason="Segmentation passed the bootstrap quality gate")
+        return QualityGateDecision(
+            status="PASS", reason="Segmentation passed the bootstrap quality gate"
+        )
 

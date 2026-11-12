@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,3 +17,6 @@ class ModelDescriptor:
     output_classes: int
     weights_path: str | None
     weights_loaded: bool
+    intended_use: str = "unspecified"
+    bundle_manifest_sha256: str | None = None
+    supported_image_types: list[str] = field(default_factory=list)

@@ -91,7 +91,9 @@ class ImageLoader:
                 rgb_array = np.asarray(rgb_image, dtype=np.uint8)
                 grayscale_array = np.asarray(grayscale_image, dtype=np.float32) / 255.0
         except UnidentifiedImageError as error:
-            raise InvalidImageError(message="Input image bytes cannot be decoded by Pillow") from error
+            raise InvalidImageError(
+                message="Input image bytes cannot be decoded by Pillow"
+            ) from error
 
         return LoadedRasterImage(
             grayscale=grayscale_array,

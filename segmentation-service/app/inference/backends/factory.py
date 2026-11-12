@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.config.settings import Settings
+from app.core.config.settings import Settings, effective_model_settings
 from app.core.errors.exceptions import ConfigurationError
 from app.inference.backends.base import SegmentationBackend
 from app.inference.backends.mock_backend import MockSegmentationBackend
@@ -13,6 +13,7 @@ def build_segmentation_backend(settings: Settings) -> SegmentationBackend:
     mock mode on machines that do not have Torch installed.
     """
 
+    settings = effective_model_settings(settings)
     backend = settings.inference_backend.lower()
 
     if backend == "mock":

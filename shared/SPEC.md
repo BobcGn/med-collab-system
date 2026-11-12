@@ -17,3 +17,5 @@ parent: med-collab-architecture
 不承载模型推理、报告编排、前端状态或具体服务 repository。数据库初始化工具是现存基础设施能力，不意味着各服务可以绕过所有权任意访问其他业务表。
 
 序列化多态约定与字段变更会影响多个消费者；按 `med-collab-architecture` 的跨层契约规则一起验证。Python 分割 schema 当前是另一份 HTTP 契约，不会因修改 Kotlin DTO 自动同步。
+
+GeneralMetric.confidence 可空：几何量没有校准置信度时保留缺失，而不是填入 0 或固定百分数。具体科研测量与用途的语义由 `segmentation-service` 和 `hospital-ai-boundary` 定义；其他既有模态 DTO 的字段未改变。

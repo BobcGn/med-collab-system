@@ -11,8 +11,8 @@ class TorchUNetBackend(SegmentationBackend):
     """Backend that executes a real 2D U-Net with PyTorch."""
 
     def __init__(self, settings: Settings):
-        self.settings = settings
         self.engine = TorchUNetEngine(settings)
+        self.settings = self.engine.settings
 
     def describe_model(self) -> ModelDescriptor:
         return self.engine.describe_model()
