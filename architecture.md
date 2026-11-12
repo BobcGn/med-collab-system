@@ -26,7 +26,9 @@ Kotlin 2.2.21 / Ktor 3.3.2 服务使用 Java 21、Gradle、Exposed 与 MySQL 协
 
 `POST /api/v1/segment` 使用 snake_case JSON，传递请求 ID、医院/患者身份、模态、影像引用与输出选项；返回身份、模型描述、耗时、质量门禁、区域和工件位置。Kotlin 由 SegmentationServiceClient 镜像该契约。
 
-调用方当前要求身份/模态匹配、completed + PASS、weights_loaded、非 mock 且区域非空；这只是运行接收条件，不是模型准确率或临床适用性证明。更严格的模型与测量语义见 `segmentation-service`。
+该客户端显式采用 HTTP/1.1 访问 FastAPI/Uvicorn。JDK 默认的明文 h2c 升级曾在真实 Uvicorn 联调中导致空 body / HTTP 422，而原 JDK 模拟服务器未暴露此行为；因此禁用该升级，并保留请求头回归与真实服务集成验证。这不改变 JSON 契约或其他服务的传输策略。
+
+调用方当前要求身份/模态匹配、completed + PASS、weights_loaded、非 mock 且区域非空；这只是运行接收条件，不是模型准确率或临床适用性证明。更严格的模型与测量语义见 `segmentation-service`。课程模型的 research 用途须贯穿 Python、Kotlin payload 和报告，不得因丢失标记而进入旧临床指标映射；其职责边界归 `hospital-ai-boundary`。
 
 修改接口时必须一起检查 Python schema、Kotlin 客户端、工具 payload、相关 shared DTO 和前端消费者；边界原则以 `hospital-ai-boundary` 为准。不要让前端重新拼造模型结论，也不要把 GPU/Python 依赖直接塞入业务 JVM。
 
@@ -38,11 +40,17 @@ Python 将 mask、overlay 和结果快照写入服务端目录；metric 的报�
 
 ## 安全与验证边界
 
-代码包含 JWT、部分角色检查、路径检查和质量门禁，但不能声称已实现完整医院隔离。用户已确认身份范围校验、审计与登记可靠性需补强；metric 请求仍接受客户端身份并填充 unknown 默认值，Python 输入与工件路径缺少受控范围约束。
+代码包含 JWT、部分角色检查、路径检查和质量门禁，但不能声称已实现完整医院隔离。用户已确认身份范围校验、审计与登记可靠性需补强；metric 请求仍接受客户端身份并填充 unknown 默认值，Python 原始影像路径、远程 URL 和访问身份仍缺少完整受控范围约束；工件命名与覆盖约束已由分割模块收紧，但不构成服务鉴权。
 
 现有启发式指标与真实训练模型必须可区分；“确定性”只说明执行方式，不自动证明医学含义。当前源码中的默认本地启发式结果仍可生成标为正式的 PDF，这一事实不构成对其临床使用的认可。
 
 默认端口及启动操作以 README 和 scripts/quick-start.sh 为入口；启动脚本构建时跳过测试，不能用启动成功替代验证。Docker/跨容器路径、医院部署与真实数据授权尚未验收。
+
+## 交付门禁
+
+PR 流水线将 shared 与四个 Kotlin 服务的测试失败作为阻塞，而不是允许失败后继续报绿；共享 DTO 变化同时触发前端构建，门禁配置自身变化也触发相关检查。
+
+Python 门禁使用 CPU PyTorch 和训练依赖运行合成测试，并检查 JUnit 中核心训练、指标与模型包测试确实执行且没有跳过或失败，避免可选依赖缺失产生假绿。公共 CI 不需要原始数据、研究权重或医院数据库；真实 MPS/模型联调属于单独的显式验收证据，不能由构建成功替代。
 
 ## 文档权威关系
 
