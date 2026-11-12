@@ -7,7 +7,9 @@ from typing import Any
 
 import numpy as np
 
-from app.postprocessing.mask_ops import remove_small_components as remove_small_components
+from app.postprocessing.mask_ops import remove_small_components
+
+__all__ = ["aggregate_metrics", "binary_metrics", "remove_small_components"]
 
 
 def _binary_mask(value: np.ndarray) -> np.ndarray:

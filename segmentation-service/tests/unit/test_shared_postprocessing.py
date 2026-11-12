@@ -9,11 +9,15 @@ from app.preprocessing.image_preprocessor import ImagePreprocessor
 from app.preprocessing.transforms import prepare_tensor
 from app.schemas.internal.segmentation import LoadedRasterImage, PreparedSegmentationInput
 from app.schemas.responses.segmentation import ModelDescriptorResponse, SegmentationRegionResponse
+from app.training import metrics
 from app.training.metrics import remove_small_components as evaluation_cleanup
 
 
 def test_evaluation_reexports_the_service_bfs_and_uses_four_connectivity() -> None:
-    assert evaluation_cleanup is remove_small_components
+    assert set(metrics.__all__) == {
+        "aggregate_metrics", "binary_metrics", "remove_small_components",
+    }
+    assert evaluation_cleanup is metrics.remove_small_components is remove_small_components
     mask = np.zeros((8, 8), dtype=np.uint8)
     mask[1:3, 1:3] = 1
     mask[3:5, 3:5] = 1

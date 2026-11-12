@@ -46,15 +46,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
-    print(f"Manifest: {args.output.resolve()}")
-    print("Source/license: user-confirmed only; no automatic web verification.")
-    print("Split unit: duplicate_group; patient independence is NOT verified.")
-    for split in SPLITS:
-        records = [r for r in manifest["records"] if r["split"] == split]
-        counts = Counter(r["category"] for r in records)
-        groups = len({r["group_id"] for r in records})
-        classes = " ".join(f"{category}={counts[category]}" for category in CATEGORIES)
-        print(f"{split}: images={len(records)} groups={groups} {classes}")
+    else:
+        print(f"Manifest: {args.output.resolve()}")
+        print("Source/license: user-confirmed only; no automatic web verification.")
+        print("Split unit: duplicate_group; patient independence is NOT verified.")
+        for split in SPLITS:
+            records = [r for r in manifest["records"] if r["split"] == split]
+            counts = Counter(r["category"] for r in records)
+            groups = len({r["group_id"] for r in records})
+            classes = " ".join(f"{category}={counts[category]}" for category in CATEGORIES)
+            print(f"{split}: images={len(records)} groups={groups} {classes}")
     return 0
 
 

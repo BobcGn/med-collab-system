@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
@@ -361,6 +362,31 @@ class TrainingDataTestCase(unittest.TestCase):
             )
         self.assertIn("patient independence is NOT verified", output.getvalue())
         self.assertIn("no automatic web verification", output.getvalue())
+
+    def test_cli_manifest_failures_exit_without_success_output(self) -> None:
+        args = [
+            "--data-root", str(self.root),
+            "--output", str(self.output),
+            "--source-url", "https://example.org/synthetic-busi",
+            "--license", "Synthetic test fixture only",
+            "--source-verified",
+        ]
+        for error in (OSError("cannot read fixture"), ValueError("invalid fixture")):
+            with self.subTest(error=type(error).__name__):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    patch("app.training.prepare.build_manifest", side_effect=error) as builder,
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                    self.assertRaises(SystemExit) as raised,
+                ):
+                    main(args)
+                builder.assert_called_once()
+                self.assertEqual(raised.exception.code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn(str(error), stderr.getvalue())
+                self.assertIn("error:", stderr.getvalue())
+                self.assertFalse(self.output.exists())
 
     def test_dataset_rejects_invalid_configuration(self) -> None:
         self._build()
