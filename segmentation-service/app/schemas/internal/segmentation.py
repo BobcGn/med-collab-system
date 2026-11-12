@@ -85,7 +85,7 @@ class RegionComputation:
     pixel_count: int
     mean_confidence: float
     coverage_percent: float
-    estimated_size_mm: float
+    estimated_size_mm: float | None
     left_percent: float
     top_percent: float
     width_percent: float
@@ -93,3 +93,5 @@ class RegionComputation:
     center_x_percent: float
     center_y_percent: float
     contour: list[tuple[float, float]] = field(default_factory=list)
+    width_px: int = 0
+    height_px: int = 0

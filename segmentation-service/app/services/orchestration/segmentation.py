@@ -9,6 +9,7 @@ from app.domain.entities.segmentation import (
     SegmentationResult,
     SegmentationTiming,
 )
+from app.inference.pipelines.segmentation_pipeline import SegmentationPipeline
 from app.postprocessing.assembler import SegmentationAssembler
 from app.preprocessing.normalizer import RequestNormalizer
 from app.schemas.requests.segmentation import BatchSegmentationRequest, SegmentationRequest
@@ -25,7 +26,6 @@ from app.schemas.responses.segmentation import (
 )
 from app.services.quality.gate import QualityGateService
 from app.services.storage.artifacts import ArtifactStorageService
-from app.inference.pipelines.segmentation_pipeline import SegmentationPipeline
 
 
 class SegmentationOrchestrator:
@@ -66,7 +66,9 @@ class SegmentationOrchestrator:
         result = SegmentationResult(
             request_id=prepared_request.request_id,
             status=_map_result_status(quality_gate.status),
-            message=_build_result_message(quality_gate.status, quality_gate.reason, inference_output.model_note),
+            message=_build_result_message(
+                quality_gate.status, quality_gate.reason, inference_output.model_note
+            ),
             patient_id=prepared_request.patient_id,
             patient_name=prepared_request.patient_name,
             hospital_id=prepared_request.hospital_id,
@@ -126,6 +128,9 @@ def _to_response(result: SegmentationResult) -> SegmentationResponse:
             output_classes=result.model.output_classes,
             weights_path=result.model.weights_path,
             weights_loaded=result.model.weights_loaded,
+            intended_use=result.model.intended_use,
+            bundle_manifest_sha256=result.model.bundle_manifest_sha256,
+            supported_image_types=result.model.supported_image_types,
         ),
         timing=TimingResponse(
             preprocess_ms=result.timing.preprocess_ms,
@@ -151,6 +156,9 @@ def _to_response(result: SegmentationResult) -> SegmentationResponse:
                 severity=region.severity,
                 coverage_percent=region.coverage_percent,
                 estimated_size_mm=region.estimated_size_mm,
+                pixel_count=region.pixel_count,
+                width_px=region.width_px,
+                height_px=region.height_px,
                 bounding_box=BoundingBoxResponse(
                     left_percent=region.bounding_box.left_percent,
                     top_percent=region.bounding_box.top_percent,

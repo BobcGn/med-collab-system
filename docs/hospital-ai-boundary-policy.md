@@ -1,3 +1,12 @@
+---
+id: hospital-ai-boundary
+type: architecture-design
+title: 医院生产环境 AI 职责边界
+status: draft
+parent: med-collab-architecture
+tags: [medical-safety, policy]
+---
+
 # 医院生产环境 AI 边界与策略图说明
 
 ## 1. 目标
@@ -10,6 +19,8 @@
 - 将“影像分析”和“正式报告生成”严格拆分为两个受控阶段
 
 ## 2. 角色边界
+
+本节规定允许与禁止的职责，不表示所有能力或临床权限已经实现。当前真实入口、默认启发式限制及未完成项见第5节；规范约束不得被旧提案或界面文案替代。
 
 ### 2.1 U-Net / 结构化分析工具
 
@@ -56,17 +67,25 @@
 - 在正式分析失败时顶替 U-Net 给出“看起来像结论”的内容
 - 生成未经结构化分析支撑的正式报告
 
-## 3. 新的受控策略图
+### 2.4 课程科研结果与报告
+
+课程模型包必须明确为 `research`，该用途贯穿分割结果、工具 payload 和报告；只能出具明确非诊断的科研分割报告，不能升级为临床正式报告。结构化、权重加载成功、质量门禁 PASS 或课程指标较好，都不赋予模型临床资格。
+
+科研报告只陈述可验证的分割与几何量，不补充血流、良恶性或临床风险。无物理标定不得制造毫米测量，无校准不得填入固定临床置信度；用途或关键契约缺失时拒绝处理，而不是静默降级。具体跨语言字段由 `segmentation-service` 和 `metric-agent-harness` 定义。
+
+## 3. 目标受控执行约束
+
+以下是职责与校验的目标约束，不是当前Koog执行轨迹、医院上线证明或登记事务保证。当前路由直接调用受控函数，生成后由浏览器另行发起持久化；实际实现见第5节和 `med-collab-architecture`。
 
 ```mermaid
 flowchart LR
     A[接收结构化请求] --> B[强制职责边界校验]
     B --> C[调用 U-Net/确定性结构化分析工具]
     C --> D[校验结构化分析契约]
-    D --> E[调用正式报告生成工具]
-    E --> F[校验报告与分析一致性]
-    F --> G[登记正式报告]
-    G --> H[输出正式结果]
+    D --> E[调用用途受限的报告生成工具]
+    E --> F[校验报告与分析及用途一致性]
+    F --> G[满足受控登记要求]
+    G --> H[输出受控结果]
 ```
 
 ## 4. 策略图的强制规则
@@ -104,19 +123,19 @@ flowchart LR
 
 - `metric-service/src/main/kotlin/aiagent/strategy/StrategyGraph.kt`
 
-当前已改为：
+策略图定义包含：
 
 - 受控请求受理子图
 - 受控结构化分析子图
 - 正式报告生成子图
 
-并且策略图与实际运行入口共用同一套受控流水线函数。
+策略图与实际运行入口复用受控分析和报告工具函数，但实际 HTTP / WebSocket 入口直接执行 `executeControlledMetricReportPipeline`，并未运行 `metricReportStrategy` 图。图内“登记正式报告”节点当前只打印日志，不代表业务数据库登记；实际生成、确认及登记关系见 `med-collab-architecture`。
 
 ### 5.2 路由入口
 
 - `metric-service/src/main/kotlin/Routing.kt`
 
-当前已改为：
+当前入口行为：
 
 - 图片分析只走受控结构化流水线
 - 结构化流水线失败时，不再回退到 LLM 生成影像分析
@@ -128,12 +147,14 @@ flowchart LR
 - `metric-service/src/main/kotlin/aiagent/tools/SegmentationServiceClient.kt`
 - `metric-service/src/main/kotlin/aiagent/tools/MedicalImageAnalyzerTool.kt`
 
-当前正式影像分析链路已对接独立 Python `segmentation-service`：
+当前远程分割接收分支已对接独立 Python `segmentation-service`：
 
-- `metric-service` 默认调用 `segmentation-service` 的 `POST /api/v1/segment`
-- 分割服务返回的结构化区域、质量门禁、模型信息和工件路径会映射为正式分析 payload
+- 仅在显式启用 `METRIC_SEGMENTATION_SERVICE_ENABLED=true` 后，`metric-service` 才调用 `segmentation-service` 的 `POST /api/v1/segment`；当前默认关闭，使用本地启发式像素分析，并非默认使用已训练 U-Net
+- 分割服务返回的结构化区域、质量门禁、模型摘要和工件存在信息会映射为分析 payload；research 已保留用途、包哈希及部分模型/门禁 keyIndicators，但不保留完整工件路径或原始模型响应。shared 持久化与前端转换还会进一步缩减字段，不能称为完整审计链
 - 分割服务不可用、契约不匹配、质量门禁失败或无结构化区域时，链路失败并进入人工复核提示
 - 不允许在分割服务失败时回退到 LLM 生成医学结论
+
+上述规则描述远程分割启用后的接收边界，不表示默认本地启发式链路或任何已加载权重已经过医学有效性验证。确定性算法、`weights_loaded=true` 和 PDF 生成成功均不能独立证明临床可用性；已确认的指标语义限制见 `segmentation-service` 和 `metric-agent-harness`。
 
 ### 5.4 LLM 配置
 
@@ -141,7 +162,7 @@ flowchart LR
 
 当前已明确：
 
-- DeepSeek/Koog 仅为后续非诊断文本能力预留
+- DeepSeek/Koog 仅为后续非诊断文本能力预留，当前文本分支只是固定范围说明，不实际调用 LLM 或绑定历史报告进行多轮解释
 - 不参与正式影像分析与正式报告生成
 
 ## 6. 医院生产环境执行原则
@@ -156,7 +177,7 @@ flowchart LR
 
 ## 7. 最终结论
 
-医院生产环境的边界必须是硬边界，不是提示性边界。
+医院生产环境的边界必须是硬边界，不是提示性边界。本政策与文档同步不等于完整授权、数据/模型治理、可靠登记或临床验证已经实现；现有规范外观、PASS、CI成功或正式样式PDF不能豁免上线前置要求。
 
 因此当前链路的原则是：
 

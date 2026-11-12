@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 
 from app.api.dependencies.services import get_segmentation_orchestrator
@@ -11,7 +13,7 @@ router = APIRouter(prefix="/segment", tags=["segmentation"])
 @router.post("", response_model=SegmentationResponse)
 def segment_image(
     request: SegmentationRequest,
-    orchestrator: SegmentationOrchestrator = Depends(get_segmentation_orchestrator),
+    orchestrator: Annotated[SegmentationOrchestrator, Depends(get_segmentation_orchestrator)],
 ) -> SegmentationResponse:
     """Run segmentation for a single image request."""
 
@@ -21,7 +23,7 @@ def segment_image(
 @router.post("/batch", response_model=BatchSegmentationResponse)
 def segment_batch(
     request: BatchSegmentationRequest,
-    orchestrator: SegmentationOrchestrator = Depends(get_segmentation_orchestrator),
+    orchestrator: Annotated[SegmentationOrchestrator, Depends(get_segmentation_orchestrator)],
 ) -> BatchSegmentationResponse:
     """Run segmentation sequentially for a small batch of requests."""
 

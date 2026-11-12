@@ -460,12 +460,15 @@ private suspend fun buildAiResponse(
     }
 
     if (pipelineExecution.isSuccess) {
+        val research = pipelineExecution.getOrNull()?.let {
+            metricPayloadJson.decodeFromString(GeneratedReportPayload.serializer(), it).intendedUse == "research"
+        } == true
         return MetricAiSocketEnvelope(
             type = "ai_response",
             requestId = normalizedRequest.requestId,
-            message = "结构化影像分析与正式报告已完成",
+            message = if (research) "科研影像分割与非诊断报告已完成" else "结构化影像分析与正式报告已完成",
             analysisResult = pipelineExecution.getOrNull(),
-            confidence = 95,
+            confidence = if (research) null else 95,
             createdAt = createdAt,
             user = user,
         )

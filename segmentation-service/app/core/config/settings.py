@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 BASE_DIR = Path(__file__).resolve().parents[3]
 DEFAULT_CONFIGS = {
@@ -25,6 +25,7 @@ ENV_FIELD_MAP = {
     "SEGMENTATION_SERVICE_MODEL_NAME": "model_name",
     "SEGMENTATION_SERVICE_MODEL_VERSION": "model_version",
     "SEGMENTATION_SERVICE_MODEL_WEIGHTS_PATH": "model_weights_path",
+    "SEGMENTATION_SERVICE_MODEL_MANIFEST_PATH": "model_manifest_path",
     "SEGMENTATION_SERVICE_DEVICE": "device",
     "SEGMENTATION_SERVICE_ALLOW_RANDOM_WEIGHTS": "allow_random_weights",
     "SEGMENTATION_SERVICE_INPUT_HEIGHT": "input_height",
@@ -63,12 +64,13 @@ class Settings(BaseModel):
     probability_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     min_region_pixels: int = Field(default=24, ge=1)
     min_confidence: float = Field(default=0.55, ge=0.0, le=1.0)
-    pixel_spacing_mm: float = Field(default=0.7, gt=0.0)
+    pixel_spacing_mm: float | None = Field(default=0.7, gt=0.0)
     max_contour_points: int = Field(default=48, ge=4)
 
     model_name: str = "unet-bootstrap"
     model_version: str = "0.1.0"
     model_weights_path: str | None = None
+    model_manifest_path: str | None = None
     allow_random_weights: bool = True
     input_height: int = Field(default=256, ge=32)
     input_width: int = Field(default=256, ge=32)
@@ -80,6 +82,26 @@ class Settings(BaseModel):
     artifacts_dir: str = "var/artifacts"
     return_artifacts: bool = True
     loaded_config_file: str | None = None
+
+    _bundle_manifest: dict[str, Any] | None = PrivateAttr(default=None)
+    _bundle_manifest_sha256: str | None = PrivateAttr(default=None)
+
+    @property
+    def bundle_manifest(self) -> dict[str, Any] | None:
+        """The validated bundle snapshot used to derive this runtime configuration."""
+        return self._bundle_manifest
+
+    @property
+    def bundle_manifest_sha256(self) -> str | None:
+        return self._bundle_manifest_sha256
+
+    @property
+    def manifest_path(self) -> Path | None:
+        """Resolve the bundle manifest relative to the service root, like weights."""
+        if not self.model_manifest_path:
+            return None
+        path = Path(self.model_manifest_path).expanduser()
+        return path.resolve() if path.is_absolute() else (BASE_DIR / path).resolve()
 
     @property
     def artifacts_path(self) -> Path:
@@ -118,7 +140,7 @@ def _read_toml(path: Path) -> dict[str, Any]:
     model = raw.get("model", {})
     storage = raw.get("storage", {})
 
-    return {
+    data = {
         "environment": service.get("environment"),
         "app_name": service.get("app_name"),
         "app_version": service.get("app_version"),
@@ -137,6 +159,7 @@ def _read_toml(path: Path) -> dict[str, Any]:
         "model_name": model.get("name"),
         "model_version": model.get("version"),
         "model_weights_path": model.get("weights_path"),
+        "model_manifest_path": model.get("manifest_path"),
         "allow_random_weights": model.get("allow_random_weights"),
         "input_height": model.get("input_height"),
         "input_width": model.get("input_width"),
@@ -148,6 +171,7 @@ def _read_toml(path: Path) -> dict[str, Any]:
         "return_artifacts": storage.get("return_artifacts"),
         "loaded_config_file": str(path),
     }
+    return {key: value for key, value in data.items() if value is not None}
 
 
 def _env_overrides() -> dict[str, Any]:
@@ -170,12 +194,81 @@ def get_settings() -> Settings:
 
     environment = os.getenv("SEGMENTATION_SERVICE_ENVIRONMENT", "local")
     config_file = os.getenv("SEGMENTATION_SERVICE_CONFIG_FILE")
-    config_path = Path(config_file).expanduser() if config_file else _default_config_path(environment)
+    config_path = (
+        Path(config_file).expanduser() if config_file else _default_config_path(environment)
+    )
 
     data = _read_toml(config_path)
+    # Configuration precedence: see segmentation-service/SPEC.md.
+    if not config_file and data.get("min_region_pixels") == Settings().min_region_pixels:
+        data.pop("min_region_pixels", None)
     data.update(_env_overrides())
 
     if data.get("loaded_config_file") is None and config_path.exists():
         data["loaded_config_file"] = str(config_path)
 
     return Settings.model_validate(data)
+
+
+def effective_model_settings(settings: Settings) -> Settings:
+    """Derive one shared, fail-closed runtime copy from a checked research bundle.
+
+    Legacy settings are unchanged. Reusing an effective copy is idempotent, so the
+    orchestrator, preprocessing, engine, and postprocessing share one configuration.
+    """
+    if not settings.model_manifest_path or settings.bundle_manifest is not None:
+        return settings
+
+    from app.core.errors.exceptions import InferenceUnavailableError
+    from app.inference.model_bundle import file_sha256, read_bundle_manifest
+
+    try:
+        path = settings.manifest_path
+        manifest = read_bundle_manifest(path)
+        digest = file_sha256(path)
+    except Exception as error:
+        raise InferenceUnavailableError(
+            message="Model bundle is unavailable or incompatible",
+            detail=str(error),
+        ) from error
+
+    config = manifest["model_config"]
+    effective = settings.model_copy(
+        update={
+            "inference_backend": "torch_unet",
+            "allow_random_weights": False,
+            "model_manifest_path": str(path),
+            "model_weights_path": str(path.parent / manifest["weights"]["file"]),
+            "model_name": "unet-coursework-research",
+            "model_version": f"research-{digest[:16]}",
+            "input_height": config["input_height"],
+            "input_width": config["input_width"],
+            "in_channels": config["in_channels"],
+            "output_classes": config["output_classes"],
+            "base_channels": config["base_channels"],
+            "lesion_class_index": 0,
+            "probability_threshold": manifest["threshold"],
+            "pixel_spacing_mm": None,
+            "min_region_pixels": (
+                settings.min_region_pixels
+                if "min_region_pixels" in settings.model_fields_set
+                else 16
+            ),
+        }
+    )
+    effective._bundle_manifest = manifest
+    effective._bundle_manifest_sha256 = digest
+    return effective
+
+
+def validate_bundle_image_type(settings: Settings, image_type: str) -> None:
+    """Enforce bundle modality constraints even outside the HTTP normalizer."""
+    from app.core.errors.exceptions import InvalidImageError
+
+    if settings.bundle_manifest is not None:
+        supported = settings.bundle_manifest["model_config"]["supported_image_types"]
+        if image_type not in supported:
+            raise InvalidImageError(
+                message="Model bundle supports only ULTRASOUND images",
+                detail=image_type,
+            )

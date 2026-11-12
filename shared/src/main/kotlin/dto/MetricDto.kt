@@ -64,7 +64,7 @@ sealed class MetricDto {
         val value: Double, // 指标值
         val unit: String, // 单位
         val referenceRange: String, // 参考范围
-        val confidence: Double // 置信度
+        val confidence: Double? = null // 可选置信度
     ) : MetricDto()
 
     /**

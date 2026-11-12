@@ -24,6 +24,10 @@ dev = [
 unet = [
   "torch>=2.4.0,<3.0.0",
 ]
+training = [
+  "torch>=2.4.0,<3.0.0",
+  "matplotlib>=3.9.0,<4.0.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -35,6 +39,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

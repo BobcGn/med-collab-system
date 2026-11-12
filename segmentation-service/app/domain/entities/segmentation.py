@@ -17,9 +17,12 @@ class SegmentationRegion:
     location: str
     severity: str
     coverage_percent: float
-    estimated_size_mm: float
+    estimated_size_mm: float | None
     bounding_box: BoundingBox
     contour: list[ContourPoint] = field(default_factory=list)
+    pixel_count: int = 0
+    width_px: int = 0
+    height_px: int = 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -107,6 +107,12 @@ internal data class SegmentationModelDescriptor(
     val weightsPath: String? = null,
     @SerialName("weights_loaded")
     val weightsLoaded: Boolean,
+    @SerialName("intended_use")
+    val intendedUse: String = "unspecified",
+    @SerialName("bundle_manifest_sha256")
+    val bundleManifestSha256: String? = null,
+    @SerialName("supported_image_types")
+    val supportedImageTypes: List<String> = emptyList(),
 )
 
 @Serializable
@@ -148,10 +154,16 @@ internal data class SegmentationRegion(
     @SerialName("coverage_percent")
     val coveragePercent: Double,
     @SerialName("estimated_size_mm")
-    val estimatedSizeMm: Double,
+    val estimatedSizeMm: Double? = null,
     @SerialName("bounding_box")
     val boundingBox: SegmentationBoundingBox,
     val contour: List<SegmentationContourPoint> = emptyList(),
+    @SerialName("pixel_count")
+    val pixelCount: Int? = null,
+    @SerialName("width_px")
+    val widthPx: Int? = null,
+    @SerialName("height_px")
+    val heightPx: Int? = null,
 )
 
 @Serializable
@@ -183,6 +195,7 @@ internal object SegmentationServiceClient {
 
         val timeout = Duration.ofSeconds(settings.timeoutSeconds.coerceAtLeast(1))
         val httpClient = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(timeout)
             .build()
         val requestBody = toolJson.encodeToString(SegmentationServiceRequest.serializer(), request)

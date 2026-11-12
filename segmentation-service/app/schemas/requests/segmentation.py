@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.domain.value_objects.request_id import validate_request_id_component
+
 
 class ImageReferenceRequest(BaseModel):
     source_type: Literal["LOCAL_FILE", "DATA_URL", "OBJECT_STORAGE", "INLINE_REFERENCE"]
@@ -35,6 +37,11 @@ class SegmentationRequest(BaseModel):
     image_type: str = Field(min_length=1)
     image: ImageReferenceRequest
     options: SegmentationOptionsRequest = Field(default_factory=SegmentationOptionsRequest)
+
+    @field_validator("request_id")
+    @classmethod
+    def validate_request_id(cls, value: str | None) -> str | None:
+        return validate_request_id_component(value) if value is not None else None
 
     @field_validator("hospital_id", "patient_id", "patient_name", "image_type")
     @classmethod

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class BoundingBoxResponse(BaseModel):
@@ -26,6 +26,9 @@ class ModelDescriptorResponse(BaseModel):
     output_classes: int
     weights_path: str | None = None
     weights_loaded: bool
+    intended_use: str = "unspecified"
+    bundle_manifest_sha256: str | None = None
+    supported_image_types: list[str] = Field(default_factory=list)
 
 
 class TimingResponse(BaseModel):
@@ -53,7 +56,10 @@ class SegmentationRegionResponse(BaseModel):
     location: str
     severity: str
     coverage_percent: float
-    estimated_size_mm: float
+    estimated_size_mm: float | None = None
+    pixel_count: int = 0
+    width_px: int = 0
+    height_px: int = 0
     bounding_box: BoundingBoxResponse
     contour: list[ContourPointResponse]
 

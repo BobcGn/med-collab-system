@@ -17,7 +17,9 @@ except ModuleNotFoundError:  # pragma: no cover - local environment may not have
 from app.core.config.settings import get_settings
 
 
-@unittest.skipIf(np is None or TestClient is None or Image is None, "runtime dependencies are not installed")
+@unittest.skipIf(
+    np is None or TestClient is None or Image is None, "runtime dependencies are not installed"
+)
 class AppRoutesIntegrationTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._temp_dir = tempfile.TemporaryDirectory()

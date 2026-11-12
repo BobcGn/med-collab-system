@@ -245,6 +245,14 @@ private fun validateGeneratedReportPayload(
     require(payload.report.patientName == analysis.payload.analysis.patientName) {
         "报告中的患者姓名与结构化分析结果不一致"
     }
+    require(payload.intendedUse == analysis.payload.intendedUse) {
+        "报告用途与结构化分析结果不一致"
+    }
+    if (analysis.payload.intendedUse == "research") {
+        require(payload.report.reportType.endsWith("_RESEARCH_REPORT")) {
+            "科研结果不得转换为临床正式报告"
+        }
+    }
     require(payload.report.status == "generated") {
         "报告未处于 generated 状态，禁止作为正式报告输出"
     }

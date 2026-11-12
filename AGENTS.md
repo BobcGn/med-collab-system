@@ -33,6 +33,8 @@ Non-negotiable rules:
 - Formal report generation must consume validated structured analysis results, not free-form LLM output.
 - If structured analysis fails, return failure or manual-review guidance. Do not add an LLM fallback that invents a result.
 - If you change the imaging/report pipeline, keep policy, code paths, and tests aligned.
+- Research bundles remain research/ULTRASOUND: preserve purpose and pixel units, nullable uncalibrated confidence/physical dimensions, and non-diagnostic reports. Do not invent millimetres, blood flow or clinical risk; see the owning specs.
+- The BUSI test set is sealed. Do not retrain, rescore it, or tune against its observed results to validate a documentation/configuration change.
 
 When touching the controlled imaging flow, inspect these files first:
 
@@ -43,10 +45,15 @@ When touching the controlled imaging flow, inspect these files first:
 - `metric-service/src/main/kotlin/aiagent/tools/MedicalImageAnalyzerTool.kt`
 - `metric-service/src/main/kotlin/aiagent/tools/ReportGenerateTool.kt`
 - `metric-service/src/main/kotlin/aiagent/tools/ToolPayloads.kt`
+- `metric-service/src/main/kotlin/aiagent/tools/ResearchSegmentationPayload.kt`
+- `metric-service/src/main/kotlin/aiagent/tools/SegmentationServiceClient.kt`
 
 ## Source Of Truth By Area
 
+- Applicable `SPEC.md` / `architecture.md` and hospital policy: authoritative boundaries and decisions; existing draft status requires human review, not automatic activation.
 - Root `README.md`: repo layout, startup flow, default ports, and boundary summary.
+- `docs/README.md` and `docs/api-reference.md`: current documentation/API entry points; service `API.md` files describe actual routes/DTOs/errors, not planned capabilities.
+- `docs/segmentation-service-operation-manual.md`: current operating guide. The integration-plan document is a historical design/implementation comparison, not another runtime contract.
 - `scripts/quick-start.sh`: authoritative local startup flow for the full stack.
 - `frontend/package.json`: frontend scripts and actual client toolchain.
 - `frontend/README.md`: confirms the client is pure React. Do not reintroduce Vue.
@@ -87,6 +94,7 @@ Do not hand-edit generated or local-runtime artifacts unless the task is explici
 - `reports/`
 - `generated-reports/`
 - `segmentation-service/.venv/`
+- `segmentation-service/var/` (datasets, weights, experiments and local evidence)
 - `__pycache__/`
 - `.DS_Store`
 
@@ -120,6 +128,7 @@ Segmentation service:
 - `cd segmentation-service && pip install -e .`
 - `cd segmentation-service && pip install -e ".[dev]"`
 - `cd segmentation-service && pip install -e ".[unet]"`
+- `cd segmentation-service && pip install -e ".[dev,training]"`
 - `cd segmentation-service && pytest`
 - `cd segmentation-service && ruff check .`
 - `cd segmentation-service && scripts/run-dev.sh`
@@ -147,6 +156,9 @@ Default local ports from the root README:
 - If you change the controlled imaging/report flow, validate both Kotlin and Python sides.
 - If you change startup or integration behavior, prefer validating with `scripts/quick-start.sh` or the nearest narrower equivalent.
 - Frontend currently has build scripts but no obvious test harness; at minimum run `npm --prefix frontend run build` after client changes unless the task is documentation-only.
+- Python core-training verification requires the training dependencies and `.github/scripts/check_python_training_tests.py` against JUnit; optional-dependency skips do not prove coverage. CPU synthetic CI is not real-model or clinical acceptance.
+- `NO-SOURCE` auth/gateway tests and default-skipped real-service tests are not passing coverage. Document links/examples may be checked without starting services, databases, training or reevaluating the sealed test set.
+- Documentation must separate current code, historical proposals and policy requirements. Do not claim the Koog graph runs, all requests use the gateway, persistence is atomic, or hospital authorization is complete; consult the module specs and APIs.
 
 Useful manual checks after a local start:
 

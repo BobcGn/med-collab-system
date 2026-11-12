@@ -345,6 +345,10 @@ private fun analyzeWithSegmentationService(
     )
 
     validateSegmentationResponse(response, args)
+    if (response.model.intendedUse == "research") {
+        require(response.requestId == requestId) { "分割服务响应中的请求ID与请求不一致" }
+        return buildResearchSegmentationPayload(response, args, imagePath, source.snapshot, now)
+    }
 
     val localPixelFeatures = source.image?.let { image -> extractPixelFeatures(image, args.imageType) }
     val features = extractSegmentationFeatures(response, localPixelFeatures)
@@ -405,6 +409,9 @@ private fun validateSegmentationResponse(
     require(response.status == "completed" && response.qualityGate.status == "PASS") {
         "分割服务质量门禁未通过: status=${response.status}, gate=${response.qualityGate.status}, reason=${response.qualityGate.reason}"
     }
+    require(response.model.intendedUse in setOf("unspecified", "research")) {
+        "分割服务返回未知模型用途，禁止按临床结果处理"
+    }
     require(response.model.weightsLoaded) {
         "分割模型未加载训练权重，禁止进入正式报告阶段"
     }
@@ -413,6 +420,16 @@ private fun validateSegmentationResponse(
     }
     require(response.regions.isNotEmpty()) {
         "分割服务未返回可用于正式报告的结构化区域"
+    }
+    if (response.model.intendedUse != "research") {
+        require(response.model.bundleManifestSha256 == null) {
+            "模型包结果缺少明确科研用途，禁止进入临床指标映射"
+        }
+        require(response.regions.all { region ->
+            region.estimatedSizeMm?.let { it.isFinite() && it > 0.0 } == true
+        }) {
+            "非科研分割结果缺少有效物理尺寸，禁止进入正式报告阶段"
+        }
     }
 }
 
@@ -436,7 +453,9 @@ private fun extractSegmentationFeatures(
         contrast = localPixelFeatures?.contrast ?: (bestConfidence * 60.0),
         edgeDensity = localPixelFeatures?.edgeDensity ?: 0.18,
         lesionCoverage = round2((totalCoverage / 100.0).coerceIn(0.0, 1.0)),
-        lesionSizeMm = primaryRegion?.estimatedSizeMm?.let(::round1) ?: 0.0,
+        lesionSizeMm = round1(requireNotNull(primaryRegion?.estimatedSizeMm) {
+            "非科研分割主区域缺少物理尺寸"
+        }),
         location = primaryRegion?.location ?: "分割服务未标注位置",
         confidence = round2(bestConfidence.coerceIn(0.0, 1.0)),
         imageQualityScore = round1((qualityBase + bestConfidence.coerceIn(0.0, 1.0) * 14.0).coerceIn(45.0, 98.0)),
@@ -463,7 +482,9 @@ private fun buildSegmentationHighlightRegions(response: SegmentationServiceRespo
                 severity = region.severity,
                 confidence = round2(region.confidence.coerceIn(0.0, 1.0)),
                 coveragePercent = round1(region.coveragePercent.coerceIn(0.0, 100.0)),
-                estimatedSizeMm = round1(region.estimatedSizeMm.coerceAtLeast(0.0)),
+                estimatedSizeMm = round1(requireNotNull(region.estimatedSizeMm) {
+                    "非科研分割区域缺少物理尺寸"
+                }),
                 shape = "BLOB",
                 rotationDegrees = 0.0,
                 boundingBox = HighlightBoundingBox(

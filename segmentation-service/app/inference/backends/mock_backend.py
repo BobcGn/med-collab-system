@@ -42,8 +42,10 @@ class MockSegmentationBackend(SegmentationBackend):
 
         probability_map = np.clip((normalized * 0.82) + 0.08, 0.0, 1.0)
         if float(probability_map.max()) < self.settings.probability_threshold:
-            probability_map[prepared_input.model_height // 4 : prepared_input.model_height // 2,
-                            prepared_input.model_width // 4 : prepared_input.model_width // 2] = 0.86
+            probability_map[
+                prepared_input.model_height // 4 : prepared_input.model_height // 2,
+                prepared_input.model_width // 4 : prepared_input.model_width // 2,
+            ] = 0.86
 
         return BackendPrediction(
             probability_map=probability_map,

@@ -14,7 +14,7 @@ def extract_region_computations(
     binary_mask: np.ndarray,
     *,
     min_region_pixels: int,
-    pixel_spacing_mm: float,
+    pixel_spacing_mm: float | None,
     max_contour_points: int,
 ) -> list[RegionComputation]:
     """Convert a binary mask into region-level measurements.
@@ -53,7 +53,11 @@ def extract_region_computations(
             height_px = max(1, (bottom - top) + 1)
             mean_confidence = float(probability_map[ys, xs].mean())
             coverage_percent = float(pixel_count / float(height * width) * 100.0)
-            estimated_size_mm = float(max(width_px, height_px) * pixel_spacing_mm)
+            estimated_size_mm = (
+                float(max(width_px, height_px) * pixel_spacing_mm)
+                if pixel_spacing_mm is not None
+                else None
+            )
             center_x = float(xs.mean())
             center_y = float(ys.mean())
 
@@ -61,6 +65,8 @@ def extract_region_computations(
                 RegionComputation(
                     region_id=f"{request_id}-region-{len(computations) + 1}",
                     pixel_count=pixel_count,
+                    width_px=width_px,
+                    height_px=height_px,
                     mean_confidence=mean_confidence,
                     coverage_percent=coverage_percent,
                     estimated_size_mm=estimated_size_mm,
@@ -76,6 +82,29 @@ def extract_region_computations(
 
     computations.sort(key=lambda item: item.mean_confidence, reverse=True)
     return computations
+
+
+def remove_small_components(mask: np.ndarray, min_region_pixels: int) -> np.ndarray:
+    """Pure four-connected BFS cleanup in original-image pixels, shared with evaluation."""
+    if min_region_pixels < 1:
+        raise ValueError("min_region_pixels must be at least 1")
+    foreground = np.asarray(mask)
+    if foreground.ndim != 2 or foreground.size == 0:
+        raise ValueError("A binary mask must be a nonempty HW array")
+    if not np.isin(foreground, (0, 1)).all():
+        raise ValueError("Binary masks must contain only 0 and 1, not probabilities")
+    visited = np.zeros(foreground.shape, dtype=bool)
+    cleaned = np.zeros(foreground.shape, dtype=np.uint8)
+    for start_y, start_x in np.argwhere(foreground):
+        if visited[start_y, start_x]:
+            continue
+        component = _collect_component(
+            foreground, visited, start_y=int(start_y), start_x=int(start_x)
+        )
+        if len(component) >= min_region_pixels:
+            ys, xs = zip(*component, strict=True)
+            cleaned[ys, xs] = 1
+    return cleaned
 
 
 def _collect_component(

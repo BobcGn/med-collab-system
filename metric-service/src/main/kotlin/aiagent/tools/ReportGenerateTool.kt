@@ -69,10 +69,10 @@ object ReportGenerateTool : Tool<ReportGenerateTool.Args, String>() {
                 patientId = analysisPayload.analysis.patientId,
                 patientName = analysisPayload.analysis.patientName,
                 analysisIds = listOf(analysisPayload.analysis.id),
-                reportType = if (analysisPayload.analysisMode == "PIXEL") {
-                    "${analysisPayload.imageType}_AI_REPORT"
-                } else {
-                    "${analysisPayload.imageType}_LIMITED_REPORT"
+                reportType = when {
+                    analysisPayload.intendedUse == "research" -> "${analysisPayload.imageType}_RESEARCH_REPORT"
+                    analysisPayload.analysisMode == "PIXEL" -> "${analysisPayload.imageType}_AI_REPORT"
+                    else -> "${analysisPayload.imageType}_LIMITED_REPORT"
                 },
                 filePath = reportPath.toAbsolutePath().normalize().toString(),
                 fileSize = fileSize,
@@ -97,6 +97,7 @@ object ReportGenerateTool : Tool<ReportGenerateTool.Args, String>() {
                 highlightLegend = analysisPayload.highlightLegend,
                 limitations = analysisPayload.limitations,
                 reportContent = reportContent,
+                intendedUse = analysisPayload.intendedUse,
             )
 
             toolJson.encodeToString(GeneratedReportPayload.serializer(), payload)
@@ -133,6 +134,9 @@ private fun parseAnalysisPayload(rawAnalysis: String): MedicalImageAnalysisPaylo
 }
 
 private fun buildConclusion(payload: MedicalImageAnalysisPayload): String {
+    if (payload.intendedUse == "research") {
+        return "${payload.summary} 仅提供像素区域测量，不评估良恶性、血流或临床风险；不得用于诊断。"
+    }
     if (payload.analysisMode != "PIXEL") {
         return "本报告基于影像元数据生成，未读取到原始像素，结论仅用于流程联调和数据完整性确认。"
     }
@@ -194,13 +198,17 @@ private fun renderReport(
     }
 
     return """
-        |# 医疗影像 AI 分析报告
+        |# ${if (payload.intendedUse == "research") "科研影像分割报告（非诊断）" else "医疗影像 AI 分析报告"}
         |
         |## 报告信息
         |- 报告编号: $reportId
         |- 分析编号: ${payload.analysis.id}
         |- 生成时间: $generatedAt
-        |- 报告类型: ${if (payload.analysisMode == "PIXEL") "正式分析报告" else "受限分析报告"}
+        |- 报告类型: ${when {
+            payload.intendedUse == "research" -> "科研分割报告，不是临床正式报告"
+            payload.analysisMode == "PIXEL" -> "正式分析报告"
+            else -> "受限分析报告"
+        }}
         |
         |## 患者信息
         |- 患者姓名: ${payload.analysis.patientName}
@@ -287,10 +295,17 @@ private fun buildHighlightRegionsSection(regions: List<HighlightRegion>): String
     }
 
     val lines = mutableListOf(
-        "- 共标记 ${regions.size} 个可疑区域，结果图中按优先级以 ${regions.joinToString("、") { "${it.colorName}${it.label}" }} 高亮。",
+        "- 共标记 ${regions.size} 个区域，结果图中以 ${regions.joinToString("、") { "${it.colorName}${it.label}" }} 高亮。",
     )
     lines += regions.map { region ->
-        "- ${region.colorName}${region.label}（${region.annotationTitle}）: ${region.annotationMeaning} 估计范围 ${region.estimatedSizeMm} mm，覆盖 ${region.coveragePercent}%，风险 ${region.severity}，置信度 ${round1(region.confidence * 100.0)}%。"
+        val measurement = if (region.pixelCount != null) {
+            "面积 ${region.pixelCount} px²，外接框 ${region.widthPx} × ${region.heightPx} px，" +
+                "前景平均概率 ${round1(region.confidence * 100.0)}%（未经临床校准）"
+        } else {
+            val size = region.estimatedSizeMm?.let { "$it mm" } ?: "未提供物理标定"
+            "估计范围 $size，风险 ${region.severity}，置信度 ${round1(region.confidence * 100.0)}%"
+        }
+        "- ${region.colorName}${region.label}（${region.annotationTitle}）: ${region.annotationMeaning} $measurement，覆盖 ${region.coveragePercent}%。"
     }
     return lines.joinToString("\n")
 }
@@ -299,6 +314,12 @@ private fun buildReportFigureSection(
     payload: MedicalImageAnalysisPayload,
     reportPreviewEmbedded: Boolean,
 ): String {
+    if (payload.intendedUse == "research") {
+        return buildBulletSection(listOf(
+            if (reportPreviewEmbedded) "已嵌入原始影像和预测轮廓。" else "未能嵌入原始影像，请结合工件复核。",
+            "颜色仅标识分割区域，不代表风险等级；本图不构成诊断。",
+        ))
+    }
     if (payload.analysisMode != "PIXEL") {
         return buildBulletSection(
             listOf(

@@ -9,6 +9,7 @@ from PIL import Image
 from app.core.config.settings import Settings
 from app.core.errors.exceptions import ArtifactStorageError
 from app.domain.entities.segmentation import SegmentationArtifacts, SegmentationResult
+from app.domain.value_objects.request_id import validate_request_id_component
 from app.schemas.internal.segmentation import RawInferenceOutput
 
 
@@ -26,16 +27,25 @@ class ArtifactStorageService:
         if not self.settings.return_artifacts:
             return SegmentationArtifacts()
 
-        task_directory = self.settings.artifacts_path / result.request_id
-
         try:
-            task_directory.mkdir(parents=True, exist_ok=True)
-            mask_path = task_directory / "mask.png"
+            request_id = validate_request_id_component(result.request_id)
+            task_directory = self.settings.artifacts_path / request_id
+            self.settings.artifacts_path.mkdir(parents=True, exist_ok=True)
+            # Atomically reserve an immutable result directory; never overwrite a prior run.
+            task_directory.mkdir(exist_ok=False)
+            mask_path = (
+                task_directory / "mask.png" if inference_output.request.return_mask else None
+            )
             overlay_path = task_directory / "overlay.png"
             metadata_path = task_directory / "result.json"
 
-            self._save_mask(mask_path, inference_output.binary_mask)
-            self._save_overlay(overlay_path, inference_output.loaded_image.preview_rgb, inference_output.binary_mask)
+            if mask_path is not None:
+                self._save_mask(mask_path, inference_output.binary_mask)
+            self._save_overlay(
+                overlay_path,
+                inference_output.loaded_image.preview_rgb,
+                inference_output.binary_mask,
+            )
             metadata_path.write_text(
                 json.dumps(_build_metadata_payload(result), indent=2, ensure_ascii=True),
                 encoding="utf-8",
@@ -47,21 +57,23 @@ class ArtifactStorageService:
             ) from error
 
         return SegmentationArtifacts(
-            mask_path=str(mask_path),
+            mask_path=str(mask_path) if mask_path is not None else None,
             overlay_path=str(overlay_path),
             metadata_path=str(metadata_path),
         )
 
     def _save_mask(self, path: Path, binary_mask: np.ndarray) -> None:
         mask_pixels = np.uint8(np.clip(binary_mask, 0, 1) * 255)
-        Image.fromarray(mask_pixels, mode="L").save(path)
+        Image.fromarray(mask_pixels).save(path)
 
     def _save_overlay(self, path: Path, preview_rgb: np.ndarray, binary_mask: np.ndarray) -> None:
         overlay = preview_rgb.copy()
         foreground = binary_mask.astype(bool)
         overlay[foreground] = np.array([255, 64, 64], dtype=np.uint8)
-        blended = ((preview_rgb.astype(np.float32) * 0.55) + (overlay.astype(np.float32) * 0.45)).astype(np.uint8)
-        Image.fromarray(blended, mode="RGB").save(path)
+        blended = (
+            (preview_rgb.astype(np.float32) * 0.55) + (overlay.astype(np.float32) * 0.45)
+        ).astype(np.uint8)
+        Image.fromarray(blended).save(path)
 
 
 def _build_metadata_payload(result: SegmentationResult) -> dict[str, object]:
@@ -80,6 +92,13 @@ def _build_metadata_payload(result: SegmentationResult) -> dict[str, object]:
             "device": result.model.device,
             "weights_path": result.model.weights_path,
             "weights_loaded": result.model.weights_loaded,
+            "input_height": result.model.input_height,
+            "input_width": result.model.input_width,
+            "in_channels": result.model.in_channels,
+            "output_classes": result.model.output_classes,
+            "intended_use": result.model.intended_use,
+            "bundle_manifest_sha256": result.model.bundle_manifest_sha256,
+            "supported_image_types": result.model.supported_image_types,
         },
         "timing": {
             "preprocess_ms": result.timing.preprocess_ms,
@@ -100,6 +119,9 @@ def _build_metadata_payload(result: SegmentationResult) -> dict[str, object]:
                 "severity": region.severity,
                 "coverage_percent": region.coverage_percent,
                 "estimated_size_mm": region.estimated_size_mm,
+                "pixel_count": region.pixel_count,
+                "width_px": region.width_px,
+                "height_px": region.height_px,
                 "bounding_box": {
                     "left_percent": region.bounding_box.left_percent,
                     "top_percent": region.bounding_box.top_percent,

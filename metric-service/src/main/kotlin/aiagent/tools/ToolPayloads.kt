@@ -54,12 +54,15 @@ internal data class HighlightRegion(
     val severity: String,
     val confidence: Double,
     val coveragePercent: Double,
-    val estimatedSizeMm: Double,
+    val estimatedSizeMm: Double? = null,
     val shape: String,
     val rotationDegrees: Double,
     val boundingBox: HighlightBoundingBox,
     val contour: List<HighlightContourPoint> = emptyList(),
     val note: String,
+    val pixelCount: Int? = null,
+    val widthPx: Int? = null,
+    val heightPx: Int? = null,
 )
 
 @Serializable
@@ -97,6 +100,7 @@ internal data class MedicalImageAnalysisPayload(
     val highlightRegions: List<HighlightRegion> = emptyList(),
     val highlightLegend: List<HighlightLegendItem> = emptyList(),
     val limitations: List<String> = emptyList(),
+    val intendedUse: String = "unspecified",
 )
 
 @Serializable
@@ -115,4 +119,5 @@ internal data class GeneratedReportPayload(
     val highlightLegend: List<HighlightLegendItem> = emptyList(),
     val limitations: List<String> = emptyList(),
     val reportContent: String,
+    val intendedUse: String = "unspecified",
 )

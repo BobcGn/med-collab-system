@@ -1,100 +1,48 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code contributors. Read [AGENTS.md](AGENTS.md) for repository-wide rules, commands and generated-artifact exclusions. This repository is a medical collaboration prototype and research-validation system, **not an accepted hospital/clinical deployment**.
 
-## Project Overview
+## Read the right document
 
-Monorepo for a **medical collaboration and medical imaging analysis system**. Six services:
+- [README](README.md): prerequisites, local startup, ports, default-versus-research behavior.
+- [Documentation index](docs/README.md) and [API reference](docs/api-reference.md): current module guides and real endpoint contracts, including known defects and unverified behavior.
+- [architecture.md](architecture.md) and applicable module `SPEC.md`: authoritative responsibilities, decisions and trust boundaries. Existing specs remain draft until human review; documentation synchronization does not activate them.
+- [Hospital AI policy](docs/hospital-ai-boundary-policy.md): hard constraints. The integration-plan document is a historical proposal/implementation comparison, not the current protocol.
+- [scripts/quick-start.sh](scripts/quick-start.sh): actual full-stack startup; it skips tests, inherits configuration and does not start a database server.
+- [frontend/package.json](frontend/package.json) and [segmentation-service/pyproject.toml](segmentation-service/pyproject.toml): actual toolchains/dependencies, not legacy root node_modules.
 
-| Module | Tech | Port | Purpose |
-|---|---|---|---|
-| `api-gateway/` | Kotlin/Ktor | 8088 | Edge routing, JWT auth, request forwarding |
-| `auth-service/` | Kotlin/Ktor | 8081 | Auth, users, hospitals, departments, WebSocket notifications |
-| `patient-service/` | Kotlin/Ktor | 8082 | Patient records CRUD, search, statistics |
-| `metric-service/` | Kotlin/Ktor | 8083 | Imaging orchestration, AI pipeline, report generation (PDF) |
-| `segmentation-service/` | Python/FastAPI | 8099 | U-Net image segmentation inference |
-| `frontend/` | React 19 + Vite 8 | 5173 | Web UI |
+## Current implementation
 
-Shared DTOs, enums, and JWT utils in `shared/`. Docs in `docs/`.
+Four Java21/Kotlin/Ktor backends run on default ports auth8081, patient8082, metric8083 and gateway8088. Python/FastAPI segmentation is separate on8099; React19/Vite8 frontend uses5173 in quick-start, while standalone preview defaults4173. `shared` is a library with no server port/run entry.
 
-## Core Constraint: AI Boundary
+REST normally uses the gateway, but metric clients can fall back to direct calls. Notification/AI WebSockets connect directly to auth/metric; Ktor gateway has no WS proxy. Do not describe the gateway as the only security boundary.
 
-Hard rule (see `docs/hospital-ai-boundary-policy.md`):
-- **U-Net** (`segmentation-service`) does image segmentation and structured analysis
-- **Report tool** generates formal PDF reports from validated structured data
-- **LLM (DeepSeek)** only explains existing structured results — never does segmentation, diagnosis, or report finalization
-- Failure at any stage returns manual-review guidance, never an LLM fallback
+HTTP/WS image requests call `executeControlledMetricReportPipeline`, **not the Koog strategy graph**. Text responses are fixed scope messages, not an implemented multi-turn LLM explanation service. A configured DeepSeek Provider does not make the route run it.
 
-When touching the imaging/report pipeline, inspect these first:
-- `metric-service/src/main/kotlin/aiagent/strategy/StrategyGraph.kt`
-- `metric-service/src/main/kotlin/aiagent/validation/MetricAiConversationGuard.kt`
-- `metric-service/src/main/kotlin/aiagent/tools/MedicalImageAnalyzerTool.kt`
-- `metric-service/src/main/kotlin/aiagent/tools/ReportGenerateTool.kt`
-- `metric-service/src/main/kotlin/aiagent/tools/ToolPayloads.kt`
-- `metric-service/src/main/kotlin/aiagent/tools/SegmentationServiceClient.kt`
+`METRIC_SEGMENTATION_SERVICE_ENABLED` defaults false, using legacy local heuristics. Enabling Python startup or choosing torch_unet does not mean trained weights are loaded or metric remote inference is enabled. Legacy formal-looking PDF output and its HU-like/mm/blood-flow/risk rules are not medically validated measurements.
 
-## Commands
+The research path preserves `research`/`ULTRASOUND`, pixel geometry, null physical measurements/uncalibrated confidence and a non-diagnostic `_RESEARCH_REPORT`. Never turn model loading, hashes or quality PASS into clinical qualification. LLM output must not replace analysis, failed segmentation or formal report facts; failure returns failure/manual review.
 
-### Backend (Gradle)
-```
-./gradlew test                                              # all tests
-./gradlew :auth-service:test                                # single module
-./gradlew :metric-service:installDist                       # build distribution
-```
+PDF creation occurs before browser confirmation. Analysis persistence and registration of the existing report are separate requests; the unused graph's registration node only logs. There is no atomic end-to-end registration, reliable retry/checkpoint or complete provenance preservation across tools, frontend and database DTOs.
 
-### Frontend
-```
-npm --prefix frontend run dev
+## Cross-layer and safety checks
+
+Before changing the controlled flow, inspect Routing/Application, StrategyGraph, MetricAiConversationGuard, MedicalImageAnalyzerTool, ReportGenerateTool, ToolPayloads, ResearchSegmentationPayload and SegmentationServiceClient; see the exact paths in AGENTS.md.
+
+API changes require joint review of Kotlin routes/services, shared DTOs, frontend consumers and Python schemas. JSON is not globally uniform: Python uses snake_case; metric tool/POST/storage uses `kind`, ordinary GET defaults to `type`. Nullable `GeneralMetric.confidence`/millimetres must not be replaced by zero or fixed95. See module APIs rather than inventing a universal wrapper or endpoints from DTO/helper names.
+
+JWT, menu roles and caller hospital/patient fields do not prove resource authorization. Existing public admin registration, partial-only checks, direct metric CRUD, debug-token logging, raw path/URL loading and container configuration are documented gaps, not security designs to copy. Do not reproduce real credentials or patient data in documentation/tests/logs.
+
+## Common validation commands
+
+Run from repository root unless noted; these are choices, not a command batch that must start every service.
+
+```bash
+./gradlew :shared:test :patient-service:test :metric-service:test
+npm --prefix frontend ci --include=optional
 npm --prefix frontend run build
-npm --prefix frontend run preview
 ```
 
-### Segmentation Service (Python)
-```
-cd segmentation-service && pip install -e ".[dev]"          # install with dev deps
-cd segmentation-service && pip install -e ".[unet]"         # install with torch
-cd segmentation-service && pytest                           # run tests
-cd segmentation-service && ruff check .                     # lint
-cd segmentation-service && scripts/run-dev.sh               # start dev server
-```
+Python uses its module venv and `.[dev,training]`; exact pytest/Ruff/JUnit gate commands are in [segmentation README](segmentation-service/README.md). Core tests must actually execute, not skip for missing Torch. auth/gateway currently have no test source; NO-SOURCE is not coverage. Real Python→Kotlin→PDF integration is explicit opt-in, not established by its default skip.
 
-### Full Stack
-```
-scripts/quick-start.sh                                      # build & start all
-scripts/quick-start.sh --without-segmentation               # skip Python service
-scripts/quick-start.sh --frontend-mode dev                  # Vite dev mode
-scripts/quick-start.sh --segmentation-backend torch_unet    # real U-Net
-```
-
-### Manual Verification (after start)
-```
-curl http://localhost:8083/health
-curl http://localhost:8099/health
-curl http://localhost:8099/api/v1/models/current
-```
-Logs go to `.run/logs/<service>.log`.
-
-## Key Environment Variables
-
-- `METRIC_SEGMENTATION_SERVICE_ENABLED` — metric-service calls segmentation (default `false`). Only enable when segmentation has real weights loaded.
-- `METRIC_SEGMENTATION_SERVICE_URL` — default `http://127.0.0.1:8099`
-- `METRIC_SEGMENTATION_SERVICE_TIMEOUT_SECONDS` — default `30`
-- `SEGMENTATION_BACKEND` — `torch_unet` (default) or `mock`
-- `SEGMENTATION_SERVICE_MODEL_WEIGHTS_PATH` — path to model weights
-
-## Architecture Notes
-
-- All frontend requests go through `api-gateway`, which authenticates at the edge
-- Auth is JWT-based (HMAC256), shared secret across all services
-- `metric-service` orchestrates imaging: receives images → calls segmentation-service → generates PDF → persists results
-- Python service is self-contained with clean layered architecture under `app/`: `api/` > `services/` > `inference/` > `preprocessing/` > `postprocessing/`
-- API payload changes must be updated across: Kotlin route/service/repo, shared DTOs, frontend API client, Python schemas
-- Frontend has no test harness yet — at minimum run `npm --prefix frontend run build` after client changes
-
-## Source of Truth Per Area
-
-- `README.md` — repo layout, startup flow, default ports
-- `scripts/quick-start.sh` — authoritative local startup
-- `frontend/package.json` — actual frontend toolchain (root `package.json` only proxies into `frontend/`)
-- `segmentation-service/pyproject.toml` — Python deps, pytest config, ruff config
-- `AGENTS.md` — supplemental agent instructions (snapshot, commands, per-area sources)
+Documentation-only changes can validate links, syntax and schema examples without starting services/DB or retraining. Do not rescore/tune the sealed BUSI test set for documentation updates. Keep data, weights, generated reports and runtime evidence ignored; even historically tracked vendor/generated docs are not editing targets. Never activate specs, submit a review or merge merely because documentation or CI passes.

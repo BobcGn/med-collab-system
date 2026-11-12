@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from app.core.config.settings import Settings, get_settings
+from app.core.config.settings import Settings, effective_model_settings, get_settings
 from app.inference.backends.factory import build_segmentation_backend
 from app.inference.pipelines.segmentation_pipeline import SegmentationPipeline
 from app.postprocessing.assembler import SegmentationAssembler
@@ -14,7 +14,7 @@ from app.services.storage.artifacts import ArtifactStorageService
 def get_segmentation_orchestrator() -> SegmentationOrchestrator:
     """Build a single orchestrator instance reused by FastAPI dependency injection."""
 
-    settings = get_settings()
+    settings = effective_model_settings(get_settings())
     normalizer = RequestNormalizer(settings)
     backend = build_segmentation_backend(settings)
     pipeline = SegmentationPipeline(settings, backend)
