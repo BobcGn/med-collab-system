@@ -336,6 +336,9 @@ jobs:
   pr-review-checklist:
     name: '📋 PR Review Checklist'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     needs: [commit-lint, kotlin-checks, python-checks, frontend-checks, security-scan, docker-check]
     if: always() && github.event_name == 'pull_request'
 
@@ -478,6 +481,8 @@ jobs:
     needs: changed-files
     if: needs.changed-files.outputs.shared == 'true' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
       - uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:

@@ -50,6 +50,8 @@ Python 将 mask、overlay 和结果快照写入服务端目录；metric 的报�
 
 PR 流水线将 shared 与四个 Kotlin 服务的测试失败作为阻塞，而不是允许失败后继续报绿；共享 DTO 变化同时触发前端构建，门禁配置自身变化也触发相关检查。
 
+自动 PR 评论任务在各自 job 申请 `pull-requests: write`；需要检出代码的任务另申请 `contents: read`。权限不提升到全流水线，保留 `pull_request` 事件，不使用 PAT 或 `pull_request_target`，避免修复评论 403 时扩大其他作业的写权限；fork PR 仍受 GitHub 令牌策略限制。
+
 Python 门禁使用 CPU PyTorch 和训练依赖运行合成测试，并检查 JUnit 中核心训练、指标与模型包测试确实执行且没有跳过或失败，避免可选依赖缺失产生假绿。公共 CI 不需要原始数据、研究权重或医院数据库；真实 MPS/模型联调属于单独的显式验收证据，不能由构建成功替代。
 
 ## 文档权威关系
